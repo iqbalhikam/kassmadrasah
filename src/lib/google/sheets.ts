@@ -122,7 +122,15 @@ export async function getDatabaseData(): Promise<DatabaseData> {
     nominal: parseFloat(row[5] || "0") || 0,
     bukti_url: row[6] || "",
     created_at: row[7] || "",
-  })).sort((a: Transaksi, b: Transaksi) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+  })).sort((a: Transaksi, b: Transaksi) => {
+    const dateA = new Date(a.tanggal).getTime();
+    const dateB = new Date(b.tanggal).getTime();
+    if (dateA !== dateB) return dateB - dateA;
+    // Tiebreaker: created_at untuk presisi detik jika tanggal sama
+    const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return createdB - createdA;
+  });
 
   // Parse Pengaturan
   const pengaturanRow = valueRanges[2]?.values?.[0] || DEFAULT_SETTINGS;

@@ -734,11 +734,11 @@ export default function ReportPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left", fontSize: "9.5px", color: "#0f172a", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
                   <colgroup>
                     <col style={{ width: "26px" }} />
-                    <col style={{ width: "78px" }} />
-                    <col style={{ width: "110px" }} />
+                    <col style={{ width: "95px" }} />
+                    <col style={{ width: "105px" }} />
                     <col />
                     <col style={{ width: "58px" }} />
-                    <col style={{ width: "115px" }} />
+                    <col style={{ width: "110px" }} />
                   </colgroup>
                   <thead>
                     <tr style={{ backgroundColor: "#f1f5f9", fontSize: "8.5px", fontWeight: 700, textTransform: "uppercase", color: "#475569", letterSpacing: "0.4px", pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -756,7 +756,7 @@ export default function ReportPage() {
                       return (
                         <tr key={tx.id} style={{ pageBreakInside: "avoid", breakInside: "avoid", backgroundColor: idx % 2 === 1 ? "#f8fafc" : "#ffffff" }}>
                           <td style={{ padding: "5px 5px 5px 8px", border: "1px solid #e2e8f0", color: "#94a3b8", fontSize: "8.5px" }}>{idx + 1}</td>
-                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", fontWeight: 500, whiteSpace: "nowrap", fontSize: "9px" }}>{formatTanggal(tx.tanggal)}</td>
+                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", fontWeight: 500, fontSize: "9px", wordBreak: "keep-all" }}>{formatTanggal(tx.tanggal)}</td>
                           <td style={{ padding: "5px", border: "1px solid #e2e8f0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.kategori_nama || tx.kategori_id}</td>
                           <td style={{ padding: "5px", border: "1px solid #e2e8f0", lineHeight: "1.4", overflow: "hidden" }}>{tx.keterangan}</td>
                           <td style={{ padding: "5px", border: "1px solid #e2e8f0", verticalAlign: "middle" }}>

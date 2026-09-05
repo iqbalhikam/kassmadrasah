@@ -158,6 +158,7 @@ export default function DashboardPage() {
             <TransactionTable
               transactions={dbData.transaksi}
               categories={dbData.kategori}
+              saldoAwal={dbData.summary.saldoAwal}
               onDelete={handleDelete}
               onEdit={(tx) => {
                 setEditingTransaction(tx);

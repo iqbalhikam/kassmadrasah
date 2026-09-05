@@ -12,6 +12,9 @@ import {
   ArrowUpRight,
   Loader2,
   Pencil,
+  ArrowUpDown,
+  ArrowDown,
+  ArrowUp,
 } from "lucide-react";
 import { Transaksi, Kategori } from "@/types";
 import { formatRupiah, formatTanggal, cn } from "@/lib/utils";
@@ -19,6 +22,7 @@ import { formatRupiah, formatTanggal, cn } from "@/lib/utils";
 interface TransactionTableProps {
   transactions: Transaksi[];
   categories: Kategori[];
+  saldoAwal?: number;
   onDelete: (id: string) => void;
   onEdit?: (tx: Transaksi) => void;
   isDeletingId?: string | null;
@@ -27,6 +31,7 @@ interface TransactionTableProps {
 export function TransactionTable({
   transactions,
   categories,
+  saldoAwal = 0,
   onDelete,
   onEdit,
   isDeletingId,
@@ -34,8 +39,10 @@ export function TransactionTable({
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [selectedJenis, setSelectedJenis] = useState("ALL");
+  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
 
-  const filteredTransactions = transactions.filter((t) => {
+  const filteredTransactions = transactions
+    .filter((t) => {
     const matchSearch =
       t.keterangan.toLowerCase().includes(search.toLowerCase()) ||
       t.id.toLowerCase().includes(search.toLowerCase()) ||
@@ -44,8 +51,37 @@ export function TransactionTable({
     const matchCategory = selectedCategory === "ALL" || t.kategori_id === selectedCategory;
     const matchJenis = selectedJenis === "ALL" || t.jenis === selectedJenis;
 
-    return matchSearch && matchCategory && matchJenis;
-  });
+      return matchSearch && matchCategory && matchJenis;
+    })
+    .sort((a, b) => {
+      const dateA = new Date(a.tanggal).getTime();
+      const dateB = new Date(b.tanggal).getTime();
+      if (dateA !== dateB) {
+        return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
+      }
+      // Tiebreaker: created_at untuk presisi detik jika tanggal sama
+      const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return sortOrder === "desc" ? createdB - createdA : createdA - createdB;
+    });
+
+  // ── Running balance map (dihitung dari semua transaksi, oldest-first) ──
+  const runningBalanceMap = new Map<string, number>();
+  {
+    const chronological = [...transactions].sort((a, b) => {
+      const dateA = new Date(a.tanggal).getTime();
+      const dateB = new Date(b.tanggal).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return cA - cB;
+    });
+    let running = saldoAwal;
+    chronological.forEach((t) => {
+      running += t.jenis === "DEBIT" ? t.nominal : -t.nominal;
+      runningBalanceMap.set(t.id, running);
+    });
+  }
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 backdrop-blur-sm">
@@ -64,7 +100,7 @@ export function TransactionTable({
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <select
             value={selectedJenis}
             onChange={(e) => setSelectedJenis(e.target.value)}
@@ -87,6 +123,19 @@ export function TransactionTable({
               </option>
             ))}
           </select>
+
+          <button
+            onClick={() => setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+            title={sortOrder === "desc" ? "Terbaru ke Terlama" : "Terlama ke Terbaru"}
+            className="flex items-center justify-center gap-1.5 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs font-medium text-slate-200 hover:border-emerald-500/50 hover:text-emerald-400 transition focus:outline-none"
+          >
+            {sortOrder === "desc" ? (
+              <ArrowDown className="h-3.5 w-3.5" />
+            ) : (
+              <ArrowUp className="h-3.5 w-3.5" />
+            )}
+            {sortOrder === "desc" ? "Terbaru" : "Terlama"}
+          </button>
         </div>
 
         {/* Result count */}
@@ -142,12 +191,28 @@ export function TransactionTable({
                 </div>
 
                 {/* Category + keterangan */}
-                <div className="mb-3">
+                <div className="mb-2">
                   <span className="inline-block rounded-md bg-slate-800 px-2 py-0.5 text-[11px] font-bold text-slate-300 mb-1">
                     {tx.kategori_nama || tx.kategori_id}
                   </span>
                   <p className="text-xs text-slate-400 leading-relaxed">{tx.keterangan}</p>
                 </div>
+
+                {/* Saldo berjalan */}
+                {(() => {
+                  const saldo = runningBalanceMap.get(tx.id) ?? 0;
+                  return (
+                    <div className="flex items-center justify-between mb-3 rounded-lg bg-slate-800/50 px-3 py-1.5">
+                      <span className="text-[11px] text-slate-500 font-medium">Saldo setelah transaksi</span>
+                      <span className={cn(
+                        "text-xs font-bold font-mono",
+                        saldo >= 0 ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
+                      </span>
+                    </div>
+                  );
+                })()}
 
                 {/* Actions */}
                 <div className="flex items-center justify-between border-t border-slate-800/60 pt-3">
@@ -213,6 +278,7 @@ export function TransactionTable({
                 <th className="px-4 py-3">ID / Kategori</th>
                 <th className="px-4 py-3">Keterangan</th>
                 <th className="px-4 py-3 text-right">Nominal</th>
+                <th className="px-4 py-3 text-right">Saldo</th>
                 <th className="px-4 py-3 text-center">Bukti / Nota</th>
                 <th className="px-4 py-3 text-right">Aksi</th>
               </tr>
@@ -248,6 +314,22 @@ export function TransactionTable({
                         {isDebit ? <ArrowDownLeft className="h-3 w-3" /> : <ArrowUpRight className="h-3 w-3" />}
                         {isDebit ? "+" : "-"} {formatRupiah(tx.nominal)}
                       </div>
+                    </td>
+                    {/* Saldo Berjalan */}
+                    <td className="px-4 py-3 whitespace-nowrap text-right">
+                      {(() => {
+                        const saldo = runningBalanceMap.get(tx.id) ?? 0;
+                        return (
+                          <span
+                            className={cn(
+                              "text-xs font-bold font-mono",
+                              saldo >= 0 ? "text-emerald-400" : "text-rose-400"
+                            )}
+                          >
+                            {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       {tx.bukti_url ? (
