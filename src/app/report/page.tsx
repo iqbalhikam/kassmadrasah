@@ -250,6 +250,27 @@ export default function ReportPage() {
 
   const filteredCashflow = useMemo(() => buildCashflow(filteredTransaksi), [filteredTransaksi]);
 
+  // ── Running balance map for PDF report (all transactions, chronological) ──
+  const runningBalanceMap = useMemo(() => {
+    if (!dbData) return new Map<string, number>();
+    const saldoAwal = dbData.summary.saldoAwal ?? 0;
+    const sorted = [...dbData.transaksi].sort((a, b) => {
+      const dateA = new Date(a.tanggal).getTime();
+      const dateB = new Date(b.tanggal).getTime();
+      if (dateA !== dateB) return dateA - dateB;
+      const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return cA - cB;
+    });
+    let running = saldoAwal;
+    const map = new Map<string, number>();
+    sorted.forEach((t) => {
+      running += t.jenis === "DEBIT" ? t.nominal : -t.nominal;
+      map.set(t.id, running);
+    });
+    return map;
+  }, [dbData]);
+
   // ── Period label for the report header ───────────────────────────────────
   const periodeLabel = useMemo(() => {
     if (filterMode === "all" || !filterApplied) return "Semua Periode";
@@ -735,10 +756,11 @@ export default function ReportPage() {
                   <colgroup>
                     <col style={{ width: "26px" }} />
                     <col style={{ width: "95px" }} />
-                    <col style={{ width: "105px" }} />
+                    <col style={{ width: "100px" }} />
                     <col />
-                    <col style={{ width: "58px" }} />
-                    <col style={{ width: "110px" }} />
+                    <col style={{ width: "52px" }} />
+                    <col style={{ width: "100px" }} />
+                    <col style={{ width: "100px" }} />
                   </colgroup>
                   <thead>
                     <tr style={{ backgroundColor: "#f1f5f9", fontSize: "8.5px", fontWeight: 700, textTransform: "uppercase", color: "#475569", letterSpacing: "0.4px", pageBreakInside: "avoid", breakInside: "avoid" }}>
@@ -747,7 +769,8 @@ export default function ReportPage() {
                       <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>Kategori</th>
                       <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1" }}>Keterangan</th>
                       <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", textAlign: "center" }}>Jenis</th>
-                      <th style={{ padding: "6px 8px 6px 5px", border: "1px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap" }}>Nominal</th>
+                      <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap" }}>Nominal</th>
+                      <th style={{ padding: "6px 8px 6px 5px", border: "1px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap" }}>Saldo</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -776,8 +799,18 @@ export default function ReportPage() {
                               </span>
                             </div>
                           </td>
-                          <td style={{ padding: "5px 8px 5px 5px", border: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, color: isDebit ? "#15803d" : "#b91c1c", whiteSpace: "nowrap", fontSize: "9px" }}>
+                          <td style={{ padding: "5px 5px 5px 5px", border: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, color: isDebit ? "#15803d" : "#b91c1c", whiteSpace: "nowrap", fontSize: "9px" }}>
                             {isDebit ? "+" : "-"} {formatRupiah(tx.nominal)}
+                          </td>
+                          <td style={{ padding: "5px 8px 5px 5px", border: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", fontSize: "9px" }}>
+                            {(() => {
+                              const saldo = runningBalanceMap.get(tx.id) ?? 0;
+                              return (
+                                <span style={{ color: saldo >= 0 ? "#15803d" : "#b91c1c" }}>
+                                  {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
+                                </span>
+                              );
+                            })()}
                           </td>
                         </tr>
                       );
@@ -789,9 +822,14 @@ export default function ReportPage() {
                       <td style={{ padding: "6px 5px", border: "2px solid #cbd5e1", textAlign: "center", color: "#475569", whiteSpace: "nowrap", fontSize: "8px" }}>
                         {filteredTransaksi.filter((t) => t.jenis === "DEBIT").length}D / {filteredTransaksi.filter((t) => t.jenis === "KREDIT").length}K
                       </td>
-                      <td style={{ padding: "6px 8px 6px 5px", border: "2px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap", fontSize: "8.5px" }}>
+                      <td style={{ padding: "6px 5px", border: "2px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap", fontSize: "8.5px" }}>
                         <span style={{ color: "#15803d", display: "block" }}>+{formatRupiah(filteredSummary.totalDebit)}</span>
                         <span style={{ color: "#b91c1c", display: "block" }}>-{formatRupiah(filteredSummary.totalKredit)}</span>
+                      </td>
+                      <td style={{ padding: "6px 8px 6px 5px", border: "2px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap", fontSize: "8.5px" }}>
+                        <span style={{ color: filteredSummary.saldoAkhir >= 0 ? "#15803d" : "#b91c1c", fontWeight: 800 }}>
+                          {filteredSummary.saldoAkhir < 0 ? "-" : ""}{formatRupiah(Math.abs(filteredSummary.saldoAkhir))}
+                        </span>
                       </td>
                     </tr>
                   </tfoot>
