@@ -3,6 +3,24 @@
 @layer base {
   body {
     @apply bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-white;
+    /* Prevent content from sitting under notch/home-bar on iOS */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Improve touch targets on mobile */
+  button, a, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Prevent zoom on input focus (iOS) */
+  input, select, textarea {
+    font-size: 16px;
+  }
+
+  @media (min-width: 640px) {
+    input, select, textarea {
+      font-size: inherit;
+    }
   }
 }
 
@@ -25,11 +43,18 @@
   background: #475569;
 }
 
-/* Print specific styles for Receipts */
+/* Print specific styles */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
   body {
     background: white !important;
     color: black !important;
+    padding-bottom: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
   .no-print {
     display: none !important;
@@ -38,9 +63,19 @@
     display: block !important;
   }
   .print-card {
-    border: 1px solid #ccc !important;
+    border: none !important;
     box-shadow: none !important;
     background: white !important;
     color: black !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    min-width: 0 !important;
+    transform: none !important;
+  }
+  .print-card * {
+    overflow: visible !important;
   }
 }

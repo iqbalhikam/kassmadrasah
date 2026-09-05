@@ -4,9 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/navbar";
+import { BackupModal } from "@/components/modals/backup-modal";
 import { fetchDatabaseAction, saveSettingsAction } from "@/lib/actions";
 import { DatabaseData } from "@/types";
-import { Settings, Save, Loader2, CheckCircle2, AlertCircle, School, User, Wallet } from "lucide-react";
+import { Settings, Save, Loader2, CheckCircle2, AlertCircle, School, User, Wallet, FileSpreadsheet, RefreshCw } from "lucide-react";
 
 export default function SettingsPage() {
   const { status } = useSession();
@@ -16,6 +17,7 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -101,7 +103,7 @@ export default function SettingsPage() {
             <Settings className="h-6 w-6 text-emerald-400" /> Pengaturan Madrasah & Saldo Awal
           </h1>
           <p className="text-xs text-slate-400">
-            Atur identitas lembaga, pejabat penandatangan kuitansi, dan saldo awal kas.
+            Atur identitas lembaga, pejabat penandatangan kuitansi, dan restore data backup.
           </p>
         </div>
 
@@ -119,7 +121,7 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-sm">
+        <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-6 backdrop-blur-sm shadow-sm">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
               <School className="h-4 w-4 text-emerald-400" /> Nama Lembaga / Madrasah
@@ -193,7 +195,39 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
+
+        {/* Card Impor & Restore Data Backup */}
+        <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-slate-900/90 to-slate-950 p-6 backdrop-blur-sm space-y-4 shadow-lg shadow-emerald-950/20">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                <FileSpreadsheet className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-slate-100">
+                  Impor &amp; Restore Backup Google Sheets
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5 max-w-lg">
+                  Impor data transaksi, daftar kategori, dan pengaturan kas dari link Google Sheets cadangan/backup Anda.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsBackupModalOpen(true)}
+              className="flex items-center justify-center gap-2 rounded-xl bg-emerald-600/20 border border-emerald-500/30 px-4 py-2.5 text-xs font-bold text-emerald-300 hover:bg-emerald-600/30 hover:text-emerald-200 transition shrink-0 active:scale-95"
+            >
+              <FileSpreadsheet className="h-4 w-4 text-emerald-400" />
+              <span>Impor Data Backup</span>
+            </button>
+          </div>
+        </div>
       </main>
+
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        onSuccess={() => loadData(true)}
+      />
     </div>
   );
 }

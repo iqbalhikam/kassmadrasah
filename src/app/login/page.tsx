@@ -3,7 +3,8 @@
 import { signIn, useSession } from "next-auth/react";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { School, Database, ShieldCheck, FileSpreadsheet, Lock, ArrowRight } from "lucide-react";
+import { Database, ShieldCheck, FileSpreadsheet, Lock, ArrowRight } from "lucide-react";
+import Image from "next/image";
 
 export default function LoginPage() {
   const { data: session, status } = useSession();
@@ -23,8 +24,15 @@ export default function LoginPage() {
 
       <div className="relative z-10 w-full max-w-md text-center">
         {/* Header Logo */}
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-400 shadow-2xl shadow-emerald-500/30 mb-6">
-          <School className="h-8 w-8 text-white" />
+        <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl overflow-hidden bg-white shadow-2xl shadow-emerald-500/20 mb-6 border border-emerald-500/20">
+          <Image
+            src="/logo/logo.jpeg"
+            alt="Logo Madrasah"
+            width={80}
+            height={80}
+            className="object-contain w-full h-full p-1.5"
+            priority
+          />
         </div>
 
         <h1 className="text-3xl font-black tracking-tight text-white sm:text-4xl">

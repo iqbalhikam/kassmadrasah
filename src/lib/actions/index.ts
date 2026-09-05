@@ -4,13 +4,15 @@ import { revalidatePath } from "next/cache";
 import {
   getDatabaseData,
   addTransaction,
+  updateTransaction,
   deleteTransaction,
   addCategory,
   deleteCategory,
   updateSettings,
+  importBackupFromSpreadsheet,
 } from "@/lib/google/sheets";
 import { Transaksi, Kategori, Pengaturan } from "@/types";
-import { generateId } from "@/lib/utils";
+import { generateId, extractSpreadsheetId } from "@/lib/utils";
 
 export async function fetchDatabaseAction() {
   try {
@@ -49,6 +51,36 @@ export async function createTransactionAction(formData: FormData) {
     return { success: true, id };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal menambahkan transaksi." };
+  }
+}
+
+export async function updateTransactionAction(id: string, formData: FormData) {
+  try {
+    const tanggal = formData.get("tanggal") as string;
+    const kategori_id = formData.get("kategori_id") as string;
+    const keterangan = formData.get("keterangan") as string;
+    const jenis = formData.get("jenis") as "DEBIT" | "KREDIT";
+    const nominal = parseFloat((formData.get("nominal") as string) || "0");
+    const bukti_url = (formData.get("bukti_url") as string) || "";
+
+    if (!id || !tanggal || !kategori_id || !keterangan || !nominal) {
+      throw new Error("Mohon lengkapi semua kolom yang wajib diisi.");
+    }
+
+    await updateTransaction({
+      id,
+      tanggal,
+      kategori_id,
+      keterangan,
+      jenis,
+      nominal,
+      bukti_url,
+    });
+
+    revalidatePath("/dashboard");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Gagal memperbarui transaksi." };
   }
 }
 
@@ -116,5 +148,31 @@ export async function saveSettingsAction(formData: FormData) {
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal menyimpan pengaturan." };
+  }
+}
+
+export async function restoreBackupAction(sheetUrl: string) {
+  try {
+    const spreadsheetId = extractSpreadsheetId(sheetUrl);
+
+    if (!spreadsheetId) {
+      throw new Error("URL atau ID Google Sheets tidak valid. Contoh valid: https://docs.google.com/spreadsheets/d/1BxiMVs.../edit");
+    }
+
+    const result = await importBackupFromSpreadsheet(spreadsheetId);
+
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/settings");
+
+    return {
+      success: true,
+      report: result,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message || "Gagal melakukan impor/restore backup dari Google Sheets.",
+    };
   }
 }

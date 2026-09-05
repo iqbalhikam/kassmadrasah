@@ -3,14 +3,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { StatCards } from "@/components/dashboard/stat-cards";
 import { CashflowChart } from "@/components/dashboard/cashflow-chart";
 import { TransactionTable } from "@/components/dashboard/transaction-table";
 import { TransactionModal } from "@/components/modals/transaction-modal";
+import { BackupModal } from "@/components/modals/backup-modal";
 import { fetchDatabaseAction, deleteTransactionAction } from "@/lib/actions";
-import { DatabaseData } from "@/types";
-import { PlusCircle, Loader2, RefreshCw, AlertCircle, Database } from "lucide-react";
+import { DatabaseData, Transaksi } from "@/types";
+import { PlusCircle, Loader2, RefreshCw, AlertCircle, Database, FileSpreadsheet, FileText } from "lucide-react";
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
@@ -22,6 +24,8 @@ export default function DashboardPage() {
   const [errorMsg, setErrorMsg] = useState("");
 
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaksi | null>(null);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadData = useCallback(async (showRefreshingSpinner = false) => {
@@ -90,25 +94,40 @@ export default function DashboardPage() {
         isRefreshing={isRefreshing}
       />
 
-      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 space-y-6">
+      <main className="flex-1 mx-auto w-full max-w-7xl px-4 py-5 sm:px-6 space-y-5">
         {/* Header Title & Action Button */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               Dashboard Keuangan Kas
             </h1>
-            <p className="text-xs text-slate-400">
-              Pengelolaan dana masuk (debit) & keluar (kredit) madrasah secara real-time
+            <p className="text-xs text-slate-400 mt-0.5">
+              Pengelolaan dana masuk (debit) &amp; keluar (kredit) madrasah secara real-time
             </p>
           </div>
 
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:from-emerald-500 hover:to-teal-500 transition active:scale-95"
-          >
-            <PlusCircle className="h-4 w-4" />
-            <span>Catat Transaksi Baru</span>
-          </button>
+          {/* Action buttons */}
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/report"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl border border-slate-700/80 bg-slate-900 px-4 py-2.5 text-xs font-bold text-teal-300 hover:bg-slate-800 hover:border-teal-500/40 transition active:scale-95 shadow-sm"
+            >
+              <FileText className="h-4 w-4 text-teal-400" />
+              <span>Laporan PDF</span>
+            </Link>
+
+            <button
+              onClick={() => {
+                setEditingTransaction(null);
+                setIsAddModalOpen(true);
+              }}
+              id="btn-catat-transaksi"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:from-emerald-500 hover:to-teal-500 transition active:scale-95"
+            >
+              <PlusCircle className="h-4 w-4" />
+              <span>Catat Transaksi Baru</span>
+            </button>
+          </div>
         </div>
 
         {errorMsg && (
@@ -140,21 +159,36 @@ export default function DashboardPage() {
               transactions={dbData.transaksi}
               categories={dbData.kategori}
               onDelete={handleDelete}
+              onEdit={(tx) => {
+                setEditingTransaction(tx);
+                setIsAddModalOpen(true);
+              }}
               isDeletingId={deletingId}
             />
           </div>
         )}
       </main>
 
-      {/* Add Transaction Modal */}
+      {/* Transaction Modal (Add & Edit) */}
       {dbData && (
         <TransactionModal
           isOpen={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
+          onClose={() => {
+            setIsAddModalOpen(false);
+            setEditingTransaction(null);
+          }}
           categories={dbData.kategori}
           onSuccess={() => loadData(true)}
+          editingTransaction={editingTransaction}
         />
       )}
+
+      {/* Backup Import Modal */}
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        onSuccess={() => loadData(true)}
+      />
     </div>
   );
 }

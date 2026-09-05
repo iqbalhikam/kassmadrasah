@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { getGoogleAuthClient } from "./auth";
 import { DatabaseData, Transaksi, Kategori, Pengaturan, CashFlowMonthly } from "@/types";
+import { generateId } from "@/lib/utils";
 
 const DB_FILE_NAME = "[DB] Kas Madrasah System";
 
@@ -207,6 +208,40 @@ export async function addTransaction(t: Omit<Transaksi, "created_at">): Promise<
   });
 }
 
+export async function updateTransaction(t: Omit<Transaksi, "created_at"> & { created_at?: string }): Promise<void> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = await getOrInitSpreadsheetId();
+
+  // Read all transaction rows to find matching row index by ID
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "Transaksi!A:H",
+  });
+
+  const rows = res.data.values || [];
+  const rowIndex = rows.findIndex((row: any[]) => row[0] === t.id);
+
+  if (rowIndex === -1) {
+    throw new Error(`Transaksi ID ${t.id} tidak ditemukan.`);
+  }
+
+  const existingRow = rows[rowIndex];
+  const createdAt = existingRow[7] || new Date().toISOString();
+
+  // Sheet row is 1-based (rowIndex 0 is header row 1)
+  const sheetRow = rowIndex + 1;
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `Transaksi!A${sheetRow}:H${sheetRow}`,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[t.id, t.tanggal, t.kategori_id, t.keterangan, t.jenis, t.nominal, t.bukti_url || "", createdAt]],
+    },
+  });
+}
+
 export async function deleteTransaction(id: string): Promise<void> {
   const auth = await getGoogleAuthClient();
   const sheets = google.sheets({ version: "v4", auth });
@@ -313,6 +348,209 @@ export async function updateSettings(p: Pengaturan): Promise<void> {
       values: [[p.nama_madrasah, p.nama_bendahara, p.nama_kepala_madrasah, p.saldo_awal]],
     },
   });
+}
+
+export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): Promise<{
+  transactionsCount: number;
+  categoriesCount: number;
+  settingsUpdated: boolean;
+}> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const targetSpreadsheetId = await getOrInitSpreadsheetId();
+
+  // 1. Fetch metadata to inspect available tabs
+  let spreadsheetInfo;
+  try {
+    spreadsheetInfo = await sheets.spreadsheets.get({ spreadsheetId: sourceSpreadsheetId });
+  } catch (err: any) {
+    throw new Error("Gagal membaca Google Sheet sumber. Pastikan ID/URL benar dan izin akses sudah publik/diberikan (Siapa saja yang memiliki link).");
+  }
+
+  const sheetTabs = spreadsheetInfo.data.sheets || [];
+  const tabNames = sheetTabs.map((s: any) => s.properties?.title || "");
+
+  if (tabNames.length === 0) {
+    throw new Error("Google Sheet sumber tidak memiliki lembar kerja (sheet).");
+  }
+
+  let finalTransaksiRows: any[][] = [];
+  let finalKategoriRows: any[][] = [];
+  let finalPengaturanRow: any[] | null = null;
+
+  const hasStandardTransaksi = tabNames.includes("Transaksi");
+  const hasStandardKategori = tabNames.includes("Kategori");
+
+  if (hasStandardTransaksi || hasStandardKategori) {
+    // === Case A: Standard System Backup Format ===
+    const rangesToFetch: string[] = [];
+    if (hasStandardTransaksi) rangesToFetch.push("Transaksi!A2:H2000");
+    if (hasStandardKategori) rangesToFetch.push("Kategori!A2:C200");
+    if (tabNames.includes("Pengaturan")) rangesToFetch.push("Pengaturan!A2:D2");
+
+    const batchRes = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId: sourceSpreadsheetId,
+      ranges: rangesToFetch,
+    });
+
+    const valueRanges = batchRes.data.valueRanges || [];
+    let rangeIdx = 0;
+    if (hasStandardTransaksi) {
+      finalTransaksiRows = valueRanges[rangeIdx++]?.values || [];
+    }
+    if (hasStandardKategori) {
+      finalKategoriRows = valueRanges[rangeIdx++]?.values || [];
+    }
+    if (tabNames.includes("Pengaturan")) {
+      finalPengaturanRow = valueRanges[rangeIdx++]?.values?.[0] || null;
+    }
+  } else {
+    // === Case B: Custom/Legacy Google Sheet Format (e.g. Sheet1 with TGL, Keterangan, Debit, Kredit, ID) ===
+    const firstTabName = tabNames[0];
+    const sheetRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: sourceSpreadsheetId,
+      range: `'${firstTabName}'!A1:Z3000`,
+    });
+
+    const allRows = sheetRes.data.values || [];
+    if (allRows.length > 1) {
+      const headerRow = allRows[0].map((h: any) => String(h || "").toLowerCase().trim());
+
+      // Auto-detect column indices by header text
+      const tglCol = headerRow.findIndex((h: string) => /tgl|tanggal|date/.test(h));
+      const ketCol = headerRow.findIndex((h: string) => /keterangan|ket|description|uraian/.test(h));
+      const debitCol = headerRow.findIndex((h: string) => /debit|pemasukan|masuk/.test(h));
+      const kreditCol = headerRow.findIndex((h: string) => /kredit|pengeluaran|keluar/.test(h));
+      const idCol = headerRow.findIndex((h: string) => /id|kode|no/.test(h));
+
+      const createdAt = new Date().toISOString();
+
+      for (let i = 1; i < allRows.length; i++) {
+        const row = allRows[i];
+        if (!row || row.length === 0) continue;
+
+        const rawDate = tglCol !== -1 ? row[tglCol] : "";
+        const keterangan = ketCol !== -1 ? (row[ketCol] || "") : "Transaksi Impor";
+        const rawDebit = debitCol !== -1 ? parseCleanNumber(row[debitCol]) : 0;
+        const rawKredit = kreditCol !== -1 ? parseCleanNumber(row[kreditCol]) : 0;
+
+        // Skip rows with no date and zero nominals
+        if (!rawDate && rawDebit === 0 && rawKredit === 0) continue;
+
+        const tanggal = parseCleanDate(rawDate);
+        const jenis = rawDebit > 0 ? "DEBIT" : "KREDIT";
+        const nominal = rawDebit > 0 ? rawDebit : rawKredit;
+        const kategori_id = jenis === "DEBIT" ? "CAT-LAIN-IN" : "CAT-LAIN-OUT";
+        const txId = idCol !== -1 && row[idCol] ? String(row[idCol]).trim() : generateId("TX");
+
+        finalTransaksiRows.push([
+          txId,
+          tanggal,
+          kategori_id,
+          keterangan,
+          jenis,
+          nominal,
+          "",
+          createdAt,
+        ]);
+      }
+    }
+  }
+
+  // 2. Clear target ranges in active database before updating
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId: targetSpreadsheetId,
+    range: "Transaksi!A2:H3000",
+  });
+
+  if (finalKategoriRows.length > 0) {
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: targetSpreadsheetId,
+      range: "Kategori!A2:C200",
+    });
+  }
+
+  // 3. Write imported data into active target database
+  if (finalTransaksiRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: targetSpreadsheetId,
+      range: `Transaksi!A2:H${1 + finalTransaksiRows.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: finalTransaksiRows,
+      },
+    });
+  }
+
+  if (finalKategoriRows.length > 0) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: targetSpreadsheetId,
+      range: `Kategori!A2:C${1 + finalKategoriRows.length}`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: finalKategoriRows,
+      },
+    });
+  }
+
+  let settingsUpdated = false;
+  if (finalPengaturanRow && finalPengaturanRow.length >= 4) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: targetSpreadsheetId,
+      range: "Pengaturan!A2:D2",
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [finalPengaturanRow],
+      },
+    });
+    settingsUpdated = true;
+  }
+
+  return {
+    transactionsCount: finalTransaksiRows.length,
+    categoriesCount: finalKategoriRows.length,
+    settingsUpdated,
+  };
+}
+
+function parseCleanNumber(val: any): number {
+  if (!val) return 0;
+  if (typeof val === "number") return val;
+  const str = String(val).replace(/[^0-9.-]/g, "");
+  return parseFloat(str) || 0;
+}
+
+function parseCleanDate(dateStr: any): string {
+  if (!dateStr) return new Date().toISOString().split("T")[0];
+  const trimmed = String(dateStr).trim();
+  if (!trimmed) return new Date().toISOString().split("T")[0];
+
+  // DD/MM/YYYY or DD-MM-YYYY (e.g. 30/01/2024 -> 2024-01-30)
+  const ddmmyyyy = trimmed.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (ddmmyyyy) {
+    const day = ddmmyyyy[1].padStart(2, "0");
+    const month = ddmmyyyy[2].padStart(2, "0");
+    const year = ddmmyyyy[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  // YYYY-MM-DD or YYYY/MM/DD
+  const yyyymmdd = trimmed.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (yyyymmdd) {
+    const year = yyyymmdd[1];
+    const month = yyyymmdd[2].padStart(2, "0");
+    const day = yyyymmdd[3].padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  try {
+    const d = new Date(trimmed);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split("T")[0];
+    }
+  } catch {}
+
+  return new Date().toISOString().split("T")[0];
 }
 
 async function getSheetIdByName(spreadsheetId: string, sheetName: string, auth: any): Promise<number> {
