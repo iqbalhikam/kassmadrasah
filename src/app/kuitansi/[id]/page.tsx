@@ -148,7 +148,7 @@ export default function KuitansiPage({ params }: { params: Promise<{ id: string 
             <p className="text-slate-500">
               {formatTanggal(new Date().toISOString().split("T")[0])}
             </p>
-            <p className="font-bold text-slate-900 mb-16">Bendahara Kas</p>
+            <p className="font-bold text-slate-900 mb-16">Bendahara</p>
             <p className="font-bold text-slate-900 underline">{pengaturan.nama_bendahara}</p>
           </div>
         </div>

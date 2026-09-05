@@ -25,16 +25,8 @@ import {
 import Link from "next/link";
 import Image from "next/image";
 import { cn } from "@/lib/utils";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend,
-} from "recharts";
+
+
 
 // ─── Helper: compute cashflow per month from transactions ───────────────────
 function buildCashflow(transaksi: Transaksi[]) {
@@ -529,7 +521,7 @@ export default function ReportPage() {
             <div style={{ display: "flex", alignItems: "center", gap: "16px", minWidth: 0 }}>
               <div style={{ width: "60px", height: "60px", borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff", padding: "4px", flexShrink: 0 }}>
                 <Image
-                  src="/logo/logo-kemenag.png"
+                  src="/logo/logo.jpeg"
                   alt="Logo Madrasah"
                   width={60}
                   height={60}
@@ -596,39 +588,137 @@ export default function ReportPage() {
 
           {/* ── Chart ── */}
           <div style={{ marginTop: "20px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif", pageBreakInside: "avoid", breakInside: "avoid" }}>
-            {filteredCashflow.length > 0 ? (
-              <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "12px 16px" }}>
-                <h3 style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#334155", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
-                  <TrendingUp className="h-3.5 w-3.5 text-emerald-700 shrink-0" /> Grafik Visualisasi Arus Kas Bulanan
-                </h3>
-                <div style={{ height: "200px", width: "100%" }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={filteredCashflow} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
-                      <XAxis dataKey="bulan" stroke="#475569" fontSize={9} tickLine={false} />
-                      <YAxis
-                        stroke="#475569"
-                        fontSize={8}
-                        tickLine={false}
-                        tickFormatter={(val: number) => `${val / 1000000}M`}
-                      />
-                      <Tooltip
-                        formatter={(value: unknown) => formatRupiah(Number(value))}
-                        contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", borderColor: "#cbd5e1", fontSize: "11px", fontFamily: "Inter, sans-serif" }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "6px", fontFamily: "Inter, sans-serif" }} />
-                      <Bar dataKey="debit" name="Debit (Penerimaan)" fill="#059669" radius={[3, 3, 0, 0]} />
-                      <Bar dataKey="kredit" name="Kredit (Pengeluaran)" fill="#e11d48" radius={[3, 3, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
+            {filteredCashflow.length > 0 ? (() => {
+              // ── Pure SVG chart (html2canvas-safe) ──
+              const SVG_W = 740;
+              const SVG_H = 200;
+              const ML = 58; // margin left
+              const MR = 16; // margin right
+              const MT = 14; // margin top
+              const MB = 34; // margin bottom (room for X labels + legend)
+              const CW = SVG_W - ML - MR;
+              const CH = SVG_H - MT - MB;
+
+              const maxVal = Math.max(...filteredCashflow.flatMap((d) => [d.debit, d.kredit]), 1);
+              // Round up to a nice number
+              const rawStep = maxVal / 4;
+              const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+              const niceStep = Math.ceil(rawStep / magnitude) * magnitude;
+              const yMax = niceStep * 5;
+              const yTicks = [0, 1, 2, 3, 4, 5].map((i) => i * niceStep);
+
+              const formatY = (v: number) => {
+                if (v >= 1_000_000) return `${(v / 1_000_000 % 1 === 0 ? v / 1_000_000 : (v / 1_000_000).toFixed(1))}jt`;
+                if (v >= 1_000) return `${Math.round(v / 1_000)}rb`;
+                return `${v}`;
+              };
+
+              const n = filteredCashflow.length;
+              const slotW = CW / n;
+              const barW = Math.min(slotW * 0.28, 22);
+              const gap = 3;
+
+              return (
+                <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "12px 16px" }}>
+                  <h3 style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#334155", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+                    <TrendingUp className="h-3.5 w-3.5 text-emerald-700 shrink-0" /> Grafik Visualisasi Arus Kas Bulanan
+                  </h3>
+                  <svg
+                    viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+                    width="100%"
+                    height={SVG_H}
+                    style={{ display: "block", overflow: "visible" }}
+                  >
+                    {/* Grid lines & Y-axis labels */}
+                    {yTicks.map((tick, i) => {
+                      const y = MT + CH - (tick / yMax) * CH;
+                      return (
+                        <g key={i}>
+                          <line
+                            x1={ML} y1={y} x2={ML + CW} y2={y}
+                            stroke={tick === 0 ? "#94a3b8" : "#e2e8f0"}
+                            strokeWidth={tick === 0 ? 1.2 : 0.8}
+                            strokeDasharray={tick === 0 ? "0" : "3 3"}
+                          />
+                          <text
+                            x={ML - 6} y={y + 3.5}
+                            textAnchor="end"
+                            fontSize={7.5}
+                            fill="#94a3b8"
+                            fontFamily="Inter, sans-serif"
+                          >
+                            {formatY(tick)}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Bars */}
+                    {filteredCashflow.map((d, i) => {
+                      const slotX = ML + i * slotW;
+                      const centerX = slotX + slotW / 2;
+                      const debitH = (d.debit / yMax) * CH;
+                      const kreditH = (d.kredit / yMax) * CH;
+                      const barBaseY = MT + CH;
+
+                      return (
+                        <g key={i}>
+                          {/* Debit bar */}
+                          {d.debit > 0 && (
+                            <rect
+                              x={centerX - gap / 2 - barW}
+                              y={barBaseY - debitH}
+                              width={barW}
+                              height={debitH}
+                              fill="#059669"
+                              rx={3}
+                              ry={3}
+                            />
+                          )}
+                          {/* Kredit bar */}
+                          {d.kredit > 0 && (
+                            <rect
+                              x={centerX + gap / 2}
+                              y={barBaseY - kreditH}
+                              width={barW}
+                              height={kreditH}
+                              fill="#e11d48"
+                              rx={3}
+                              ry={3}
+                            />
+                          )}
+                          {/* X label */}
+                          <text
+                            x={centerX}
+                            y={barBaseY + 12}
+                            textAnchor="middle"
+                            fontSize={8.5}
+                            fill="#64748b"
+                            fontFamily="Inter, sans-serif"
+                          >
+                            {d.bulan}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Legend */}
+                    <g transform={`translate(${ML + CW / 2 - 70}, ${SVG_H - 10})`}>
+                      <rect x={0} y={-7} width={8} height={8} fill="#059669" rx={1.5} />
+                      <text x={11} y={0} fontSize={8} fill="#475569" fontFamily="Inter, sans-serif">Debit (Penerimaan)</text>
+                      <rect x={120} y={-7} width={8} height={8} fill="#e11d48" rx={1.5} />
+                      <text x={131} y={0} fontSize={8} fill="#475569" fontFamily="Inter, sans-serif">Kredit (Pengeluaran)</text>
+                    </g>
+                  </svg>
                 </div>
-              </div>
-            ) : (
+              );
+            })() : (
               <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "16px", textAlign: "center", fontSize: "12px", color: "#94a3b8" }}>
                 Tidak ada data transaksi pada periode ini untuk ditampilkan grafiknya.
               </div>
             )}
           </div>
+
 
           {/* ── Rincian Transaksi Table ── */}
           <div style={{ marginTop: "20px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
@@ -722,7 +812,7 @@ export default function ReportPage() {
               <p style={{ color: "#64748b", margin: 0 }}>
                 {formatTanggal(new Date().toISOString().split("T")[0])}
               </p>
-              <p style={{ fontWeight: 700, color: "#0f172a", margin: "2px 0 48px 0" }}>Bendahara Kas</p>
+              <p style={{ fontWeight: 700, color: "#0f172a", margin: "2px 0 48px 0" }}>Bendahara</p>
               <p style={{ fontWeight: 700, color: "#0f172a", textDecoration: "underline", margin: 0 }}>{pengaturan.nama_bendahara}</p>
             </div>
           </div>

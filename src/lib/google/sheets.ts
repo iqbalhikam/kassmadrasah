@@ -17,7 +17,7 @@ const DEFAULT_CATEGORIES: Array<[string, string, string]> = [
   ["CAT-LAIN-OUT", "Pengeluaran Lainnya", "KELUAR"],
 ];
 
-const DEFAULT_SETTINGS = ["MA Universal Indonesia", "Bendahara Kas", "Kepala Madrasah", "0"];
+const DEFAULT_SETTINGS = ["MA Universal Indonesia", "Bendahara", "Kepala Madrasah", "0"];
 
 export async function getOrInitSpreadsheetId(): Promise<string> {
   const auth = await getGoogleAuthClient();
@@ -128,7 +128,7 @@ export async function getDatabaseData(): Promise<DatabaseData> {
   const pengaturanRow = valueRanges[2]?.values?.[0] || DEFAULT_SETTINGS;
   const pengaturan: Pengaturan = {
     nama_madrasah: pengaturanRow[0] || "MA Universal Indonesia",
-    nama_bendahara: pengaturanRow[1] || "Bendahara Kas",
+    nama_bendahara: pengaturanRow[1] || "Bendahara",
     nama_kepala_madrasah: pengaturanRow[2] || "Kepala Madrasah",
     saldo_awal: parseFloat(pengaturanRow[3] || "0") || 0,
   };
