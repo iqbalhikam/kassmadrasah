@@ -20,6 +20,7 @@ import {
   Eye,
   Smartphone,
   FileText,
+  Download,
 } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
@@ -71,6 +72,7 @@ export default function ReportPage() {
 
   // ── Preview View Mode state (Fit HP vs Paper A4) ──────────────────────────
   const [previewViewMode, setPreviewViewMode] = useState<PreviewViewMode>("fit");
+  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -96,6 +98,139 @@ export default function ReportPage() {
     }
     loadData();
   }, []);
+
+  // ── Export PDF directly using html2pdf.js ─────────────────────────────────
+  const handleExportPDF = async () => {
+    setIsExporting(true);
+
+    // Regex to detect CSS color functions unsupported by html2canvas
+    const UNSUPPORTED_COLOR_RE =
+      /\b(okrgba|oklab|oklch|lab|color-mix|light-dark|hwb|device-cmyk)\b/i;
+
+    const sanitizeColor = (val: string): string => {
+      if (!val || typeof val !== "string") return val;
+      if (!UNSUPPORTED_COLOR_RE.test(val)) return val;
+      // Return solid dark fallback so text stays visible
+      return "rgb(15, 23, 42)";
+    };
+
+    const makeColorProxy = (style: CSSStyleDeclaration) =>
+      new Proxy(style, {
+        get(target, prop) {
+          const raw = Reflect.get(target, prop, target);
+          if (typeof raw === "string") return sanitizeColor(raw);
+          if (typeof raw === "function") {
+            return (...args: any[]) => {
+              const result = (raw as Function).apply(target, args);
+              return typeof result === "string" ? sanitizeColor(result) : result;
+            };
+          }
+          return raw;
+        },
+      });
+
+    // Patch window.getComputedStyle so html2canvas never sees unsupported colors
+    const originalGetComputedStyle = window.getComputedStyle;
+    window.getComputedStyle = function (elt: Element, pseudo?: string | null) {
+      return makeColorProxy(originalGetComputedStyle.call(window, elt, pseudo));
+    };
+
+    try {
+      const html2pdf = (await import("html2pdf.js")).default;
+      const element = document.getElementById("printable-report");
+      if (!element) throw new Error("Elemen laporan tidak ditemukan.");
+
+      const madrasahName = dbData?.pengaturan.nama_madrasah || "Kas_Madrasah";
+      const cleanName = madrasahName.replace(/[^a-zA-Z0-9]/g, "_");
+      const dateStr = new Date().toISOString().split("T")[0];
+      const fileName = `Laporan_Kas_${cleanName}_${dateStr}.pdf`;
+
+      const opt = {
+        margin: [10, 10, 10, 10] as [number, number, number, number],
+        filename: fileName,
+        image: { type: "jpeg" as const, quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          backgroundColor: "#ffffff",
+          windowWidth: 850,
+          onclone: (clonedDoc: Document) => {
+            // Patch getComputedStyle on the cloned window too
+            if (clonedDoc.defaultView) {
+              const origClone = clonedDoc.defaultView.getComputedStyle;
+              clonedDoc.defaultView.getComputedStyle = function (elt: Element, pseudo?: string | null) {
+                return makeColorProxy(origClone.call(clonedDoc.defaultView, elt, pseudo));
+              };
+            }
+
+            // Set fixed A4 dimensions on the printable root
+            const reportEl = clonedDoc.getElementById("printable-report");
+            if (reportEl) {
+              reportEl.style.width = "794px";
+              reportEl.style.minWidth = "794px";
+              reportEl.style.maxWidth = "794px";
+              reportEl.style.padding = "32px";
+              reportEl.style.margin = "0 auto";
+              reportEl.style.boxSizing = "border-box";
+              reportEl.style.borderRadius = "0px";
+              reportEl.style.backgroundColor = "#ffffff";
+              reportEl.style.color = "#0f172a";
+            }
+
+            // Sanitize CSS custom properties on inline styles (but keep all <style>/<link> tags)
+            clonedDoc.querySelectorAll<HTMLElement>("*").forEach((el) => {
+              try {
+                if (!el.style || el.style.length === 0) return;
+                for (let i = el.style.length - 1; i >= 0; i--) {
+                  const prop = el.style[i];
+                  if (!prop || !prop.startsWith("--")) continue;
+                  const val = el.style.getPropertyValue(prop);
+                  if (UNSUPPORTED_COLOR_RE.test(val)) el.style.removeProperty(prop);
+                }
+              } catch {}
+            });
+
+            // Sanitize text inside inline <style> blocks (don't remove them)
+            clonedDoc.querySelectorAll("style").forEach((styleEl) => {
+              try {
+                const orig = styleEl.textContent || "";
+                const sanitized = orig.replace(
+                  /:\s*(?:okrgba|oklab|oklch|lab|color-mix|light-dark|hwb|device-cmyk)\s*\([^;{}]*\)/gi,
+                  ": rgb(15, 23, 42)"
+                );
+                if (sanitized !== orig) styleEl.textContent = sanitized;
+              } catch {}
+            });
+
+            // Force centering on badge wrapper divs via setProperty (works with !important)
+            clonedDoc.querySelectorAll<HTMLElement>("div[data-badge-wrap='jenis']").forEach((div) => {
+              div.style.setProperty("text-align", "center", "important");
+              div.style.setProperty("width", "100%", "important");
+              div.style.setProperty("display", "block", "important");
+              const span = div.querySelector("span");
+              if (span instanceof HTMLElement) {
+                span.style.setProperty("display", "inline-block", "important");
+              }
+            });
+          },
+        },
+        jsPDF: {
+          unit: "mm" as const,
+          format: "a4" as const,
+          orientation: "portrait" as const,
+        },
+        pagebreak: { mode: ["avoid-all", "css", "legacy"], avoid: ["tr"] },
+      };
+
+      await html2pdf().set(opt).from(element).save();
+    } catch (err: any) {
+      console.error("PDF export failed:", err);
+    } finally {
+      window.getComputedStyle = originalGetComputedStyle;
+      setIsExporting(false);
+    }
+  };
 
   // ── Filtered transactions (only after Apply) ──────────────────────────────
   const filteredTransaksi = useMemo(() => {
@@ -181,13 +316,35 @@ export default function ReportPage() {
           <ArrowLeft className="h-4 w-4" /> <span className="hidden xs:inline">Kembali</span>
         </Link>
 
-        <button
-          id="btn-print-pdf"
-          onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 sm:px-6 sm:py-2.5 text-xs font-bold text-white shadow-xl shadow-emerald-600/30 hover:from-emerald-500 hover:to-teal-500 transition active:scale-95"
-        >
-          <Printer className="h-4 w-4" /> <span>CETAK / SAVE PDF</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            id="btn-export-pdf"
+            onClick={handleExportPDF}
+            disabled={isExporting}
+            className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 py-2.5 sm:px-6 sm:py-2.5 text-xs font-bold text-white shadow-xl shadow-emerald-600/30 hover:from-emerald-500 hover:to-teal-500 transition active:scale-95 disabled:opacity-50"
+          >
+            {isExporting ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin text-white" />
+                <span>Mengunduh PDF...</span>
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4 text-white" />
+                <span>DOWNLOAD / EXPORT PDF</span>
+              </>
+            )}
+          </button>
+
+          <button
+            id="btn-print-pdf"
+            onClick={() => window.print()}
+            title="Cetak via browser"
+            className="hidden sm:flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition"
+          >
+            <Printer className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       {/* ── Filter Panel (hidden on print) ── */}
@@ -209,10 +366,11 @@ export default function ReportPage() {
             <button
               id="filter-mode-all"
               onClick={() => { setFilterMode("all"); setFilterApplied(false); }}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${filterMode === "all"
+              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
+                filterMode === "all"
                   ? "border-emerald-500/50 bg-emerald-500/10 ring-1 ring-emerald-500/30"
                   : "border-slate-800 bg-slate-950/50 hover:bg-slate-800/80"
-                }`}
+              }`}
             >
               <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${filterMode === "all" ? "bg-emerald-600" : "bg-slate-800"}`}>
                 <CalendarCheck2 className="h-4 w-4 text-white" />
@@ -227,10 +385,11 @@ export default function ReportPage() {
             <button
               id="filter-mode-range"
               onClick={() => { setFilterMode("range"); setFilterApplied(false); }}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${filterMode === "range"
+              className={`flex items-center gap-3 rounded-xl border p-3 text-left transition-all ${
+                filterMode === "range"
                   ? "border-indigo-500/50 bg-indigo-500/10 ring-1 ring-indigo-500/30"
                   : "border-slate-800 bg-slate-950/50 hover:bg-slate-800/80"
-                }`}
+              }`}
             >
               <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${filterMode === "range" ? "bg-indigo-600" : "bg-slate-800"}`}>
                 <CalendarRange className="h-4 w-4 text-white" />
@@ -357,6 +516,7 @@ export default function ReportPage() {
       {/* ── Printable Report Document Container ── */}
       <div className={cn("mx-auto max-w-4xl", previewViewMode === "a4" && "overflow-x-auto pb-4")}>
         <div
+          id="printable-report"
           className={cn(
             "print-card bg-white text-slate-900 shadow-2xl transition-all duration-200",
             previewViewMode === "a4"
@@ -365,83 +525,83 @@ export default function ReportPage() {
           )}
         >
           {/* Kop Surat / Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b-2 border-slate-900 pb-4">
-            <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-              <div className="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-xl sm:rounded-2xl overflow-hidden bg-white shadow-md border border-slate-200 shrink-0">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "16px", borderBottom: "2px solid #0f172a", paddingBottom: "16px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "16px", minWidth: 0 }}>
+              <div style={{ width: "60px", height: "60px", borderRadius: "12px", border: "1px solid #e2e8f0", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff", padding: "4px", flexShrink: 0 }}>
                 <Image
-                  src="/logo/logo.jpeg"
+                  src="/logo/logo-kemenag.png"
                   alt="Logo Madrasah"
-                  width={64}
-                  height={64}
-                  className="object-contain w-full h-full p-0.5 sm:p-1"
+                  width={60}
+                  height={60}
+                  style={{ objectFit: "contain", width: "100%", height: "100%" }}
                 />
               </div>
-              <div className="min-w-0">
-                <h1 className="text-base sm:text-2xl font-black uppercase tracking-tight text-slate-900 leading-tight truncate">
+              <div style={{ minWidth: 0 }}>
+                <h1 style={{ fontSize: "18px", fontWeight: 800, textTransform: "uppercase", color: "#0f172a", margin: 0, lineHeight: 1.2, fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
                   {pengaturan.nama_madrasah}
                 </h1>
-                <p className="text-[10px] sm:text-xs font-semibold text-slate-600 uppercase tracking-wider sm:tracking-widest mt-0.5 truncate">
+                <p style={{ fontSize: "11px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px", margin: "4px 0 0 0", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
                   LAPORAN PERTANGGUNGJAWABAN KEUANGAN KAS
                 </p>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
-                  Periode: <span className="font-semibold text-slate-800">{periodeLabel}</span>
+                <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 0", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+                  Periode: <strong style={{ color: "#0f172a" }}>{periodeLabel}</strong>
                 </p>
               </div>
             </div>
 
-            <div className="flex sm:flex-col items-center sm:items-end justify-between border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200 text-[10px] sm:text-xs text-slate-600 shrink-0">
-              <div>
-                <span className="font-bold text-slate-800">Tanggal Cetak: </span>
-                <span>{formatTanggal(new Date().toISOString().split("T")[0])}</span>
-              </div>
-              <span className="mt-0.5 rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+            <div style={{ textAlign: "right", fontSize: "11px", color: "#475569", flexShrink: 0, fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+              <p style={{ margin: 0 }}>
+                <strong style={{ color: "#0f172a" }}>Tanggal Cetak: </strong>
+                {formatTanggal(new Date().toISOString().split("T")[0])}
+              </p>
+              <span style={{ display: "inline-block", marginTop: "4px", backgroundColor: "#f1f5f9", padding: "3px 8px", borderRadius: "6px", fontWeight: 600, color: "#334155", fontSize: "10px" }}>
                 {filteredTransaksi.length} transaksi
               </span>
             </div>
           </div>
 
           {/* ── Executive Summary Cards ── */}
-          <div className="mt-4">
-            <h3 className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+          <div style={{ marginTop: "20px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif", pageBreakInside: "avoid", breakInside: "avoid" }}>
+            <h3 style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#64748b", marginBottom: "8px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
               Ringkasan Keuangan Kas
             </h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 text-slate-900">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 sm:p-3">
-                <p className="text-[9px] sm:text-[10px] font-semibold text-slate-500 uppercase">Saldo Awal</p>
-                <p className="text-xs sm:text-base font-black text-slate-800 mt-0.5 truncate">{formatRupiah(filteredSummary.saldoAwal)}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
+              <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "12px 14px" }}>
+                <p style={{ fontSize: "9.5px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", margin: 0, letterSpacing: "0.5px" }}>Saldo Awal</p>
+                <p style={{ fontSize: "15px", fontWeight: 800, color: "#0f172a", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.saldoAwal)}</p>
               </div>
 
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-2.5 sm:p-3">
-                <p className="text-[9px] sm:text-[10px] font-semibold text-emerald-700 uppercase flex items-center gap-1">
+              <div style={{ borderRadius: "12px", border: "1px solid #bbf7d0", backgroundColor: "#f0fdf4", padding: "12px 14px" }}>
+                <p style={{ fontSize: "9.5px", fontWeight: 700, color: "#15803d", textTransform: "uppercase", margin: 0, letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "4px" }}>
                   <ArrowDownLeft className="h-3 w-3 shrink-0" /> Total Debit
                 </p>
-                <p className="text-xs sm:text-base font-black text-emerald-700 mt-0.5 truncate">{formatRupiah(filteredSummary.totalDebit)}</p>
+                <p style={{ fontSize: "15px", fontWeight: 800, color: "#15803d", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.totalDebit)}</p>
               </div>
 
-              <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-2.5 sm:p-3">
-                <p className="text-[9px] sm:text-[10px] font-semibold text-rose-700 uppercase flex items-center gap-1">
+              <div style={{ borderRadius: "12px", border: "1px solid #fecdd3", backgroundColor: "#fff1f2", padding: "12px 14px" }}>
+                <p style={{ fontSize: "9.5px", fontWeight: 700, color: "#b91c1c", textTransform: "uppercase", margin: 0, letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "4px" }}>
                   <ArrowUpRight className="h-3 w-3 shrink-0" /> Total Kredit
                 </p>
-                <p className="text-xs sm:text-base font-black text-rose-700 mt-0.5 truncate">{formatRupiah(filteredSummary.totalKredit)}</p>
+                <p style={{ fontSize: "15px", fontWeight: 800, color: "#b91c1c", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.totalKredit)}</p>
               </div>
 
-              <div className="rounded-xl border border-teal-300 bg-teal-50 p-2.5 sm:p-3">
-                <p className="text-[9px] sm:text-[10px] font-semibold text-teal-800 uppercase flex items-center gap-1">
+              <div style={{ borderRadius: "12px", border: "1px solid #99f6e4", backgroundColor: "#f0fdfa", padding: "12px 14px" }}>
+                <p style={{ fontSize: "9.5px", fontWeight: 700, color: "#0f766e", textTransform: "uppercase", margin: 0, letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "4px" }}>
                   <Wallet className="h-3 w-3 shrink-0" /> Saldo Akhir
                 </p>
-                <p className="text-xs sm:text-base font-black text-teal-900 mt-0.5 truncate">{formatRupiah(filteredSummary.saldoAkhir)}</p>
+                <p style={{ fontSize: "15px", fontWeight: 800, color: "#0f766e", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.saldoAkhir)}</p>
               </div>
             </div>
           </div>
 
           {/* ── Chart ── */}
-          <div className="mt-4">
+          <div style={{ marginTop: "20px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif", pageBreakInside: "avoid", breakInside: "avoid" }}>
             {filteredCashflow.length > 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
-                <h3 className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-700 mb-2 flex items-center gap-1.5">
+              <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "12px 16px" }}>
+                <h3 style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#334155", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
                   <TrendingUp className="h-3.5 w-3.5 text-emerald-700 shrink-0" /> Grafik Visualisasi Arus Kas Bulanan
                 </h3>
-                <div className="h-[180px] sm:h-[220px] w-full">
+                <div style={{ height: "200px", width: "100%" }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={filteredCashflow} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
@@ -454,9 +614,9 @@ export default function ReportPage() {
                       />
                       <Tooltip
                         formatter={(value: unknown) => formatRupiah(Number(value))}
-                        contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", borderColor: "#cbd5e1", fontSize: "11px" }}
+                        contentStyle={{ backgroundColor: "#ffffff", borderRadius: "8px", borderColor: "#cbd5e1", fontSize: "11px", fontFamily: "Inter, sans-serif" }}
                       />
-                      <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "6px" }} />
+                      <Legend wrapperStyle={{ fontSize: "10px", paddingTop: "6px", fontFamily: "Inter, sans-serif" }} />
                       <Bar dataKey="debit" name="Debit (Penerimaan)" fill="#059669" radius={[3, 3, 0, 0]} />
                       <Bar dataKey="kredit" name="Kredit (Pengeluaran)" fill="#e11d48" radius={[3, 3, 0, 0]} />
                     </BarChart>
@@ -464,66 +624,84 @@ export default function ReportPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+              <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "16px", textAlign: "center", fontSize: "12px", color: "#94a3b8" }}>
                 Tidak ada data transaksi pada periode ini untuk ditampilkan grafiknya.
               </div>
             )}
           </div>
 
           {/* ── Rincian Transaksi Table ── */}
-          <div className="mt-4">
-            <h3 className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-slate-700 mb-2">
+          <div style={{ marginTop: "20px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+            <h3 style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#334155", marginBottom: "8px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
               Rincian Catatan Transaksi Kas ({filteredTransaksi.length} transaksi)
             </h3>
             {filteredTransaksi.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-400">
+              <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "16px", textAlign: "center", fontSize: "12px", color: "#94a3b8" }}>
                 Tidak ada transaksi pada periode yang dipilih.
               </div>
             ) : (
-              <div className="overflow-x-auto rounded-xl border border-slate-300 shadow-sm">
-                <table className="w-full text-left text-[11px] sm:text-xs text-slate-800">
-                  <thead className="bg-slate-100 text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-slate-700 border-b border-slate-300">
-                    <tr>
-                      <th className="px-2.5 py-2 whitespace-nowrap">No</th>
-                      <th className="px-2.5 py-2 whitespace-nowrap">Tanggal</th>
-                      <th className="px-2.5 py-2 whitespace-nowrap">Kategori</th>
-                      <th className="px-2.5 py-2 min-w-[120px]">Keterangan</th>
-                      <th className="px-2.5 py-2 text-center whitespace-nowrap">Jenis</th>
-                      <th className="px-2.5 py-2 text-right whitespace-nowrap">Nominal</th>
+              <div style={{ borderRadius: "10px", border: "1px solid #cbd5e1", overflow: "hidden" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left", fontSize: "9.5px", color: "#0f172a", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
+                  <colgroup>
+                    <col style={{ width: "26px" }} />
+                    <col style={{ width: "78px" }} />
+                    <col style={{ width: "110px" }} />
+                    <col />
+                    <col style={{ width: "58px" }} />
+                    <col style={{ width: "115px" }} />
+                  </colgroup>
+                  <thead>
+                    <tr style={{ backgroundColor: "#f1f5f9", fontSize: "8.5px", fontWeight: 700, textTransform: "uppercase", color: "#475569", letterSpacing: "0.4px", pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      <th style={{ padding: "6px 5px 6px 8px", border: "1px solid #cbd5e1" }}>No</th>
+                      <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>Tanggal</th>
+                      <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", whiteSpace: "nowrap" }}>Kategori</th>
+                      <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1" }}>Keterangan</th>
+                      <th style={{ padding: "6px 5px", border: "1px solid #cbd5e1", textAlign: "center" }}>Jenis</th>
+                      <th style={{ padding: "6px 8px 6px 5px", border: "1px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap" }}>Nominal</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
+                  <tbody>
                     {filteredTransaksi.map((tx, idx) => {
                       const isDebit = tx.jenis === "DEBIT";
                       return (
-                        <tr key={tx.id} className="hover:bg-slate-50">
-                          <td className="px-2.5 py-2 text-slate-500 font-mono text-[10px] sm:text-xs">{idx + 1}</td>
-                          <td className="px-2.5 py-2 font-medium whitespace-nowrap">{formatTanggal(tx.tanggal)}</td>
-                          <td className="px-2.5 py-2 font-semibold whitespace-nowrap">{tx.kategori_nama || tx.kategori_id}</td>
-                          <td className="px-2.5 py-2 leading-tight">{tx.keterangan}</td>
-                          <td className="px-2.5 py-2 text-center font-bold whitespace-nowrap">
-                            <span className={cn("px-2 py-0.5 rounded-full text-[10px]", isDebit ? "bg-emerald-100 text-emerald-800 border border-emerald-300" : "bg-rose-100 text-rose-800 border border-rose-300")}>
-                              {isDebit ? "DEBIT" : "KREDIT"}
-                            </span>
+                        <tr key={tx.id} style={{ pageBreakInside: "avoid", breakInside: "avoid", backgroundColor: idx % 2 === 1 ? "#f8fafc" : "#ffffff" }}>
+                          <td style={{ padding: "5px 5px 5px 8px", border: "1px solid #e2e8f0", color: "#94a3b8", fontSize: "8.5px" }}>{idx + 1}</td>
+                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", fontWeight: 500, whiteSpace: "nowrap", fontSize: "9px" }}>{formatTanggal(tx.tanggal)}</td>
+                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tx.kategori_nama || tx.kategori_id}</td>
+                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", lineHeight: "1.4", overflow: "hidden" }}>{tx.keterangan}</td>
+                          <td style={{ padding: "5px", border: "1px solid #e2e8f0", verticalAlign: "middle" }}>
+                            <div data-badge-wrap="jenis" style={{ width: "100%", textAlign: "center" }}>
+                              <span style={{
+                                display: "inline-block",
+                                padding: "2px 6px",
+                                borderRadius: "9999px",
+                                fontSize: "7.5px",
+                                fontWeight: 700,
+                                letterSpacing: "0.3px",
+                                backgroundColor: isDebit ? "#dcfce7" : "#ffe4e6",
+                                color: isDebit ? "#166534" : "#9f1239",
+                                border: isDebit ? "1px solid #86efac" : "1px solid #fca5a5",
+                              }}>
+                                {isDebit ? "DEBIT" : "KREDIT"}
+                              </span>
+                            </div>
                           </td>
-                          <td className={cn("px-2.5 py-2 text-right font-bold whitespace-nowrap", isDebit ? "text-emerald-700" : "text-rose-700")}>
+                          <td style={{ padding: "5px 8px 5px 5px", border: "1px solid #e2e8f0", textAlign: "right", fontWeight: 700, color: isDebit ? "#15803d" : "#b91c1c", whiteSpace: "nowrap", fontSize: "9px" }}>
                             {isDebit ? "+" : "-"} {formatRupiah(tx.nominal)}
                           </td>
                         </tr>
                       );
                     })}
                   </tbody>
-                  {/* Totals row */}
-                  <tfoot className="border-t-2 border-slate-400 bg-slate-100 font-bold text-[11px] sm:text-xs">
-                    <tr>
-                      <td colSpan={4} className="px-2.5 py-2 font-bold text-slate-700">TOTAL PERIODE</td>
-                      <td className="px-2.5 py-2 text-center text-slate-600 whitespace-nowrap">
-                        {filteredTransaksi.filter((t) => t.jenis === "DEBIT").length}D &nbsp;/&nbsp; {filteredTransaksi.filter((t) => t.jenis === "KREDIT").length}K
+                  <tfoot>
+                    <tr style={{ backgroundColor: "#f1f5f9", fontWeight: 700, fontSize: "9px", pageBreakInside: "avoid", breakInside: "avoid" }}>
+                      <td colSpan={4} style={{ padding: "6px 5px 6px 8px", border: "2px solid #cbd5e1", color: "#334155" }}>TOTAL PERIODE</td>
+                      <td style={{ padding: "6px 5px", border: "2px solid #cbd5e1", textAlign: "center", color: "#475569", whiteSpace: "nowrap", fontSize: "8px" }}>
+                        {filteredTransaksi.filter((t) => t.jenis === "DEBIT").length}D / {filteredTransaksi.filter((t) => t.jenis === "KREDIT").length}K
                       </td>
-                      <td className="px-2.5 py-2 text-right whitespace-nowrap">
-                        <span className="text-emerald-700">+{formatRupiah(filteredSummary.totalDebit)}</span>
-                        {" / "}
-                        <span className="text-rose-700">-{formatRupiah(filteredSummary.totalKredit)}</span>
+                      <td style={{ padding: "6px 8px 6px 5px", border: "2px solid #cbd5e1", textAlign: "right", whiteSpace: "nowrap", fontSize: "8.5px" }}>
+                        <span style={{ color: "#15803d", display: "block" }}>+{formatRupiah(filteredSummary.totalDebit)}</span>
+                        <span style={{ color: "#b91c1c", display: "block" }}>-{formatRupiah(filteredSummary.totalKredit)}</span>
                       </td>
                     </tr>
                   </tfoot>
@@ -533,19 +711,19 @@ export default function ReportPage() {
           </div>
 
           {/* ── Signature Blocks ── */}
-          <div className="pt-6 sm:pt-8 border-t border-slate-300 grid grid-cols-2 gap-4 text-center text-[10px] sm:text-xs mt-6">
+          <div style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #cbd5e1", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", textAlign: "center", fontSize: "11px", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif", pageBreakInside: "avoid", breakInside: "avoid" }}>
             <div>
-              <p className="text-slate-500">Mengetahui,</p>
-              <p className="font-bold text-slate-900 mb-12 sm:mb-16">Kepala Madrasah</p>
-              <p className="font-bold text-slate-900 underline truncate">{pengaturan.nama_kepala_madrasah}</p>
+              <p style={{ color: "#64748b", margin: 0 }}>Mengetahui,</p>
+              <p style={{ fontWeight: 700, color: "#0f172a", margin: "2px 0 48px 0" }}>Kepala Madrasah</p>
+              <p style={{ fontWeight: 700, color: "#0f172a", textDecoration: "underline", margin: 0 }}>{pengaturan.nama_kepala_madrasah}</p>
             </div>
 
             <div>
-              <p className="text-slate-500">
+              <p style={{ color: "#64748b", margin: 0 }}>
                 {formatTanggal(new Date().toISOString().split("T")[0])}
               </p>
-              <p className="font-bold text-slate-900 mb-12 sm:mb-16">Bendahara Kas</p>
-              <p className="font-bold text-slate-900 underline truncate">{pengaturan.nama_bendahara}</p>
+              <p style={{ fontWeight: 700, color: "#0f172a", margin: "2px 0 48px 0" }}>Bendahara Kas</p>
+              <p style={{ fontWeight: 700, color: "#0f172a", textDecoration: "underline", margin: 0 }}>{pengaturan.nama_bendahara}</p>
             </div>
           </div>
         </div>
