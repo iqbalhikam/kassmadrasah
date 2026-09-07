@@ -19,5 +19,7 @@ export async function getGoogleAuthClient() {
     refresh_token: session.refreshToken,
   });
 
-  return oauth2Client;
+  (oauth2Client as any).userEmail = session.user?.email || "default";
+
+  return oauth2Client as typeof oauth2Client & { userEmail: string };
 }

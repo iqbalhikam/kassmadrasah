@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Transaksi, Kategori } from "@/types";
 import { formatRupiah, formatTanggal, cn } from "@/lib/utils";
+import { ModernSelect } from "@/components/ui/modern-select";
 
 interface TransactionTableProps {
   transactions: Transaksi[];
@@ -100,41 +101,45 @@ export function TransactionTable({
         </div>
 
         {/* Filters */}
-        <div className="grid grid-cols-3 gap-2">
-          <select
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          <ModernSelect
+            size="sm"
             value={selectedJenis}
-            onChange={(e) => setSelectedJenis(e.target.value)}
-            className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs font-medium text-slate-200 focus:border-emerald-500 focus:outline-none"
-          >
-            <option value="ALL">Semua Jenis</option>
-            <option value="DEBIT">Debit (Pemasukan)</option>
-            <option value="KREDIT">Kredit (Pengeluaran)</option>
-          </select>
+            onChange={(val) => setSelectedJenis(val)}
+            options={[
+              { value: "ALL", label: "Semua Jenis" },
+              { value: "DEBIT", label: "Debit (Masuk)", badge: "Masuk", badgeColor: "emerald" },
+              { value: "KREDIT", label: "Kredit (Keluar)", badge: "Keluar", badgeColor: "rose" },
+            ]}
+          />
 
-          <select
+          <ModernSelect
+            size="sm"
             value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs font-medium text-slate-200 focus:border-emerald-500 focus:outline-none"
-          >
-            <option value="ALL">Semua Kategori</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.nama_kategori}
-              </option>
-            ))}
-          </select>
+            onChange={(val) => setSelectedCategory(val)}
+            searchable={true}
+            options={[
+              { value: "ALL", label: "Semua Kategori" },
+              ...categories.map((cat) => ({
+                value: cat.id,
+                label: cat.nama_kategori,
+                badge: cat.jenis === "MASUK" ? "Masuk" : "Keluar",
+                badgeColor: (cat.jenis === "MASUK" ? "emerald" : "rose") as "emerald" | "rose",
+              })),
+            ]}
+          />
 
           <button
             onClick={() => setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
             title={sortOrder === "desc" ? "Terbaru ke Terlama" : "Terlama ke Terbaru"}
-            className="flex items-center justify-center gap-1.5 w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-xs font-medium text-slate-200 hover:border-emerald-500/50 hover:text-emerald-400 transition focus:outline-none"
+            className="col-span-2 sm:col-span-1 flex items-center justify-center gap-1.5 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-1.5 text-xs font-medium text-slate-200 hover:border-emerald-500/50 hover:text-emerald-400 transition focus:outline-none min-h-[34px]"
           >
             {sortOrder === "desc" ? (
               <ArrowDown className="h-3.5 w-3.5" />
             ) : (
               <ArrowUp className="h-3.5 w-3.5" />
             )}
-            {sortOrder === "desc" ? "Terbaru" : "Terlama"}
+            <span>Urutan: {sortOrder === "desc" ? "Terbaru" : "Terlama"}</span>
           </button>
         </div>
 
@@ -202,8 +207,8 @@ export function TransactionTable({
                 {(() => {
                   const saldo = runningBalanceMap.get(tx.id) ?? 0;
                   return (
-                    <div className="flex items-center justify-between mb-3 rounded-lg bg-slate-800/50 px-3 py-1.5">
-                      <span className="text-[11px] text-slate-500 font-medium">Saldo setelah transaksi</span>
+                    <div className="flex items-center justify-between mb-2.5 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
+                      <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">Saldo setelahnya</span>
                       <span className={cn(
                         "text-xs font-bold font-mono",
                         saldo >= 0 ? "text-emerald-400" : "text-rose-400"
@@ -215,50 +220,52 @@ export function TransactionTable({
                 })()}
 
                 {/* Actions */}
-                <div className="flex items-center justify-between border-t border-slate-800/60 pt-3">
-                  {tx.bukti_url ? (
-                    <a
-                      href={tx.bukti_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1 text-xs font-medium text-teal-400 hover:text-teal-300"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" /> Lihat Bukti
-                    </a>
-                  ) : (
-                    <span className="text-xs text-slate-600">Tidak ada bukti</span>
-                  )}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60 pt-2.5">
+                  <div className="text-[11px]">
+                    {tx.bukti_url ? (
+                      <a
+                        href={tx.bukti_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 font-medium text-teal-400 hover:text-teal-300"
+                      >
+                        <ExternalLink className="h-3 w-3" /> Bukti
+                      </a>
+                    ) : (
+                      <span className="text-slate-600">Tanpa bukti</span>
+                    )}
+                  </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 ml-auto">
                     {onEdit && (
                       <button
                         onClick={() => onEdit(tx)}
                         title="Edit Transaksi"
-                        className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-1.5 text-xs text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition"
+                        className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition active:scale-95"
                       >
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
+                        <Pencil className="h-3 w-3" />
+                        <span>Edit</span>
                       </button>
                     )}
                     <Link
                       href={`/kuitansi/${tx.id}`}
                       title="Cetak Kuitansi"
-                      className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2.5 py-1.5 text-xs text-slate-300 hover:text-emerald-400 hover:border-emerald-500/30 transition"
+                      className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300 hover:text-emerald-400 hover:border-emerald-500/30 transition active:scale-95"
                     >
-                      <Printer className="h-3.5 w-3.5" />
-                      Kuitansi
+                      <Printer className="h-3 w-3" />
+                      <span>Kuitansi</span>
                     </Link>
                     <button
                       onClick={() => onDelete(tx.id)}
                       disabled={isDeleting}
-                      className="flex items-center gap-1 rounded-lg border border-rose-900/40 bg-rose-950/20 px-2.5 py-1.5 text-xs text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50"
+                      className="flex items-center gap-1 rounded-lg border border-rose-900/40 bg-rose-950/20 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50 active:scale-95"
                     >
                       {isDeleting ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3 w-3" />
                       )}
-                      Hapus
+                      <span>Hapus</span>
                     </button>
                   </div>
                 </div>

@@ -1,51 +1,37 @@
-"use client";
-
-import { useEffect, useState, use } from "react";
-import { fetchDatabaseAction } from "@/lib/actions";
-import { Transaksi, Pengaturan } from "@/types";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
+import { redirect } from "next/navigation";
+import { getDatabaseData } from "@/lib/google/sheets";
 import { formatRupiah, formatTanggal } from "@/lib/utils";
-import { Printer, ArrowLeft, Loader2, School, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, School, CheckCircle2 } from "lucide-react";
+import { PrintButton } from "@/components/kuitansi/print-button";
 import Link from "next/link";
 
-export default function KuitansiPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export const dynamic = "force-dynamic";
 
-  const [transaction, setTransaction] = useState<Transaksi | null>(null);
-  const [pengaturan, setPengaturan] = useState<Pengaturan | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState("");
+export default async function KuitansiPage({ params }: { params: Promise<{ id: string }> }) {
+  const session = await getServerSession(authOptions);
+  if (!session) {
+    redirect("/login");
+  }
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const res = await fetchDatabaseAction();
-        if (res.success && res.data) {
-          const foundTx = res.data.transaksi.find((t) => t.id === id);
-          if (foundTx) {
-            setTransaction(foundTx);
-            setPengaturan(res.data.pengaturan);
-          } else {
-            setErrorMsg("Transaksi dengan ID tersebut tidak ditemukan.");
-          }
-        } else {
-          setErrorMsg(res.error || "Gagal memuat data dari Google Sheets.");
-        }
-      } catch (err: any) {
-        setErrorMsg(err.message || "Gagal memuat transaksi.");
-      } finally {
-        setIsLoading(false);
-      }
+  const { id } = await params;
+
+  let transaction = null;
+  let pengaturan = null;
+  let errorMsg = "";
+
+  try {
+    const data = await getDatabaseData();
+    const found = data.transaksi.find((t) => t.id === id);
+    if (found) {
+      transaction = found;
+      pengaturan = data.pengaturan;
+    } else {
+      errorMsg = "Transaksi dengan ID tersebut tidak ditemukan.";
     }
-    loadData();
-  }, [id]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 text-slate-300">
-        <Loader2 className="h-10 w-10 animate-spin text-emerald-400 mb-3" />
-        <p className="text-sm font-semibold">Menyiapkan Dokumen Kuitansi...</p>
-      </div>
-    );
+  } catch (err: any) {
+    errorMsg = err.message || "Gagal memuat dokumen transaksi.";
   }
 
   if (errorMsg || !transaction || !pengaturan) {
@@ -53,7 +39,7 @@ export default function KuitansiPage({ params }: { params: Promise<{ id: string 
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-950 p-4 text-center">
         <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-6 max-w-md">
           <h2 className="text-lg font-bold text-rose-400 mb-2">Dokumen Tidak Ditemukan</h2>
-          <p className="text-xs text-slate-300 mb-4">{errorMsg}</p>
+          <p className="text-xs text-slate-300 mb-4">{errorMsg || "Data tidak ditemukan."}</p>
           <Link
             href="/dashboard"
             className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-slate-200 hover:bg-slate-700"
@@ -78,12 +64,7 @@ export default function KuitansiPage({ params }: { params: Promise<{ id: string 
           <ArrowLeft className="h-4 w-4" /> Kembali ke Dashboard
         </Link>
 
-        <button
-          onClick={() => window.print()}
-          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-600/30 hover:bg-emerald-500 transition"
-        >
-          <Printer className="h-4 w-4" /> CETAK KUITANSI / SAVEPDF
-        </button>
+        <PrintButton />
       </div>
 
       {/* Printable Receipt Card */}
@@ -156,7 +137,7 @@ export default function KuitansiPage({ params }: { params: Promise<{ id: string 
         {/* Footer Note */}
         <div className="mt-8 pt-4 border-t border-dashed border-slate-300 text-center text-[10px] text-slate-400 flex items-center justify-center gap-1">
           <CheckCircle2 className="h-3 w-3 text-emerald-600" />
-          <span>Dokumen ini diterbitkan secara elektronik & tersimpan aman di Google Drive Kas Madrasah</span>
+          <span>Dokumen ini diterbitkan secara elektronik &amp; tersimpan aman di Google Drive Kas Madrasah</span>
         </div>
       </div>
     </div>

@@ -36,8 +36,8 @@ export function Navbar({ madrasahName = "MI Islamiyah Sumberharjo", onRefresh, i
     <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/90 backdrop-blur-md">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-3 py-2.5 sm:px-6 sm:py-3">
         {/* Brand logo & Madrasah title */}
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
-          <div className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded-xl overflow-hidden bg-white shadow-md shadow-emerald-500/10 border border-emerald-500/20 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+          <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-xl overflow-hidden bg-white shadow-md shadow-emerald-500/10 border border-emerald-500/20 shrink-0">
             <Image
               src="/logo/logo.jpeg"
               alt="Logo Madrasah"
@@ -49,15 +49,15 @@ export function Navbar({ madrasahName = "MI Islamiyah Sumberharjo", onRefresh, i
           </div>
           <div className="min-w-0 flex flex-col justify-center">
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-100 text-sm sm:text-base tracking-tight leading-none truncate">
+              <span className="font-bold text-slate-100 text-xs sm:text-base tracking-tight leading-none truncate">
                 Kas Madrasah
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 shrink-0">
+              <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 shrink-0">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="hidden xs:inline">Drive-Synced</span>
+                <span>Drive-Synced</span>
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 truncate max-w-[130px] xs:max-w-[170px] sm:max-w-xs mt-0.5">
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate max-w-[120px] xs:max-w-[170px] sm:max-w-xs mt-0.5">
               {madrasahName}
             </p>
           </div>
@@ -130,7 +130,7 @@ export function Navbar({ madrasahName = "MI Islamiyah Sumberharjo", onRefresh, i
       </div>
 
       {/* Mobile Nav Bar */}
-      <div className="grid grid-cols-4 md:hidden border-t border-slate-800/60 bg-slate-950/95 backdrop-blur-md px-2 py-1.5 gap-1">
+      <div className="grid grid-cols-4 md:hidden border-t border-slate-800/60 bg-slate-950/95 backdrop-blur-md px-1.5 py-1 gap-1">
         {navLinks.map((link) => {
           const Icon = link.icon;
           const isActive = pathname === link.href;
@@ -139,14 +139,14 @@ export function Navbar({ madrasahName = "MI Islamiyah Sumberharjo", onRefresh, i
               key={link.href}
               href={link.href}
               className={cn(
-                "flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-xl text-[11px] font-medium transition-all duration-150",
+                "flex flex-col items-center justify-center gap-0.5 py-1 px-0.5 rounded-xl text-[10px] sm:text-[11px] font-medium transition-all duration-150 min-w-0",
                 isActive
-                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold shadow-sm"
+                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold shadow-sm"
                   : "text-slate-400 hover:text-slate-200 hover:bg-slate-900/50"
               )}
             >
-              <Icon className={cn("h-4 w-4", isActive ? "text-emerald-400" : "text-slate-400")} />
-              <span className="truncate">{link.label}</span>
+              <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-emerald-400" : "text-slate-400")} />
+              <span className="truncate max-w-full text-center tracking-tight">{link.label}</span>
             </Link>
           );
         })}

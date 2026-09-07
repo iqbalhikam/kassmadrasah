@@ -1,9 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Upload, Loader2, CheckCircle2, AlertCircle, Edit3 } from "lucide-react";
-import { Kategori, Transaksi, TransaksiJenis } from "@/types";
-import { createTransactionAction, updateTransactionAction } from "@/lib/actions";
+import { useCurrencyInput } from "@/hooks/useCurrencyInput";
+import { X, Upload, Loader2, CheckCircle2, AlertCircle, Edit3, ScanLine, Plus, PlusCircle, Check } from "lucide-react";
+import { Kategori, KategoriJenis, Transaksi, TransaksiJenis, ScanNotaResult, GeminiModelOption } from "@/types";
+import { createTransactionAction, updateTransactionAction, createCategoryAction } from "@/lib/actions";
+import { VoiceInputBtn } from "@/components/ai/voice-input-btn";
+import { CameraScanModal } from "@/components/ai/camera-scan-modal";
+import { AIInputSuggester } from "@/components/ai/ai-input-suggester";
+import { ModernDatePicker } from "@/components/ui/modern-date-picker";
+import { ModernSelect } from "@/components/ui/modern-select";
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -11,6 +17,9 @@ interface TransactionModalProps {
   categories: Kategori[];
   onSuccess: () => void;
   editingTransaction?: Transaksi | null;
+  geminiApiKey?: string;
+  geminiModel?: GeminiModelOption;
+  onCategoryCreated?: (newCategory: Kategori) => void;
 }
 
 export function TransactionModal({
@@ -19,18 +28,36 @@ export function TransactionModal({
   categories,
   onSuccess,
   editingTransaction,
+  geminiApiKey = "",
+  geminiModel,
+  onCategoryCreated,
 }: TransactionModalProps) {
   const [jenis, setJenis] = useState<TransaksiJenis>("DEBIT");
   const [tanggal, setTanggal] = useState(new Date().toISOString().split("T")[0]);
   const [kategoriId, setKategoriId] = useState("");
   const [keterangan, setKeterangan] = useState("");
-  const [nominal, setNominal] = useState("");
+  const nominalInput = useCurrencyInput({ initial: "" });
+
+  // Categories state with local updates for instant category creation
+  const [localCategories, setLocalCategories] = useState<Kategori[]>(categories);
+  const [showNewCategoryInline, setShowNewCategoryInline] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryJenis, setNewCategoryJenis] = useState<KategoriJenis>("MASUK");
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [categorySuccessMsg, setCategorySuccessMsg] = useState("");
+
   const [file, setFile] = useState<File | null>(null);
   const [existingBuktiUrl, setExistingBuktiUrl] = useState("");
+  const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+
+  // Sync with incoming categories
+  useEffect(() => {
+    setLocalCategories(categories);
+  }, [categories]);
 
   useEffect(() => {
     if (editingTransaction) {
@@ -38,7 +65,7 @@ export function TransactionModal({
       setTanggal(editingTransaction.tanggal || new Date().toISOString().split("T")[0]);
       setKategoriId(editingTransaction.kategori_id || "");
       setKeterangan(editingTransaction.keterangan || "");
-      setNominal(editingTransaction.nominal ? editingTransaction.nominal.toString() : "");
+      nominalInput.setFromRaw(editingTransaction.nominal ? editingTransaction.nominal.toString() : "");
       setExistingBuktiUrl(editingTransaction.bukti_url || "");
       setFile(null);
     } else {
@@ -46,16 +73,57 @@ export function TransactionModal({
       setTanggal(new Date().toISOString().split("T")[0]);
       setKategoriId("");
       setKeterangan("");
-      setNominal("");
+      nominalInput.reset();
       setExistingBuktiUrl("");
       setFile(null);
     }
     setErrorMsg("");
+    setShowNewCategoryInline(false);
+    setCategorySuccessMsg("");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingTransaction, isOpen]);
+
+  // Handle direct category creation (from inline form or from AI recommendation)
+  const handleCreateCategory = async (nama: string, jenisKategori: KategoriJenis) => {
+    if (!nama.trim()) return;
+    setIsCreatingCategory(true);
+    setErrorMsg("");
+    try {
+      const formData = new FormData();
+      formData.append("nama_kategori", nama.trim());
+      formData.append("jenis", jenisKategori);
+
+      const res = await createCategoryAction(formData);
+      if (!res.success || !res.category) {
+        throw new Error(res.error || "Gagal membuat kategori.");
+      }
+
+      const createdCat = res.category;
+      setLocalCategories((prev) => {
+        if (prev.some((c) => c.id === createdCat.id)) return prev;
+        return [...prev, createdCat];
+      });
+
+      // Align transaction jenis if needed and select the new category
+      setJenis(createdCat.jenis === "MASUK" ? "DEBIT" : "KREDIT");
+      setKategoriId(createdCat.id);
+      setNewCategoryName("");
+      setShowNewCategoryInline(false);
+      setCategorySuccessMsg(`Kategori "${createdCat.nama_kategori}" berhasil dibuat & dipilih!`);
+      setTimeout(() => setCategorySuccessMsg(""), 3500);
+
+      onCategoryCreated?.(createdCat);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Gagal membuat kategori.";
+      setErrorMsg(msg);
+    } finally {
+      setIsCreatingCategory(false);
+    }
+  };
 
   if (!isOpen) return null;
 
-  const filteredCategories = categories.filter(
+  const filteredCategories = localCategories.filter(
     (c) => c.jenis === (jenis === "DEBIT" ? "MASUK" : "KELUAR")
   );
 
@@ -65,7 +133,7 @@ export function TransactionModal({
     e.preventDefault();
     setErrorMsg("");
 
-    if (!tanggal || !kategoriId || !keterangan || !nominal) {
+    if (!tanggal || !kategoriId || !keterangan || !nominalInput.rawValue) {
       setErrorMsg("Harap isi semua kolom wajib.");
       return;
     }
@@ -98,7 +166,7 @@ export function TransactionModal({
       actionFormData.append("kategori_id", kategoriId);
       actionFormData.append("keterangan", keterangan);
       actionFormData.append("jenis", jenis);
-      actionFormData.append("nominal", nominal);
+      actionFormData.append("nominal", nominalInput.rawValue);
       actionFormData.append("bukti_url", buktiUrl);
 
       let result;
@@ -113,7 +181,7 @@ export function TransactionModal({
       }
 
       setKeterangan("");
-      setNominal("");
+      nominalInput.reset();
       setFile(null);
       onSuccess();
       onClose();
@@ -126,7 +194,16 @@ export function TransactionModal({
     }
   };
 
+  const handleScanResult = (result: ScanNotaResult) => {
+    if (result.nominal) nominalInput.setFromRaw(result.nominal.toString());
+    if (result.keterangan) setKeterangan(result.keterangan);
+    if (result.tanggal) setTanggal(result.tanggal);
+    if (result.jenis) setJenis(result.jenis);
+    setIsScanModalOpen(false);
+  };
+
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
       <div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl max-h-[92dvh] flex flex-col">
         {/* Drag handle (mobile) */}
@@ -142,12 +219,25 @@ export function TransactionModal({
               {isEditMode ? `Edit Transaksi Kas (${editingTransaction.id})` : "Tambah Transaksi Kas Baru"}
             </h2>
           </div>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {geminiApiKey && (
+              <button
+                type="button"
+                onClick={() => setIsScanModalOpen(true)}
+                title="Scan nota/kuitansi dengan AI"
+                className="flex items-center gap-1.5 rounded-lg border border-violet-500/30 bg-violet-500/10 px-2.5 py-1.5 text-[11px] font-semibold text-violet-300 hover:bg-violet-500/20 transition active:scale-95"
+              >
+                <ScanLine className="h-3.5 w-3.5" />
+                <span className="hidden xs:inline">Scan Nota</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         {/* Scrollable Body */}
@@ -194,60 +284,199 @@ export function TransactionModal({
             {/* Tanggal & Kategori */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Tanggal</label>
-                <input
-                  type="date"
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Tanggal Transaksi</label>
+                <ModernDatePicker
                   value={tanggal}
-                  onChange={(e) => setTanggal(e.target.value)}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                  onChange={(val) => setTanggal(val)}
+                  placeholder="Pilih Tanggal"
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Kategori</label>
-                <select
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">Kategori Kas</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewCategoryInline(!showNewCategoryInline);
+                      setNewCategoryJenis(jenis === "DEBIT" ? "MASUK" : "KELUAR");
+                    }}
+                    className="flex items-center gap-1 text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 transition"
+                  >
+                    <Plus className="h-3 w-3" />
+                    <span>Kategori Baru</span>
+                  </button>
+                </div>
+                <ModernSelect
                   value={kategoriId}
-                  onChange={(e) => setKategoriId(e.target.value)}
-                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
-                  required
-                >
-                  <option value="">-- Pilih Kategori --</option>
-                  {filteredCategories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nama_kategori}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setKategoriId(val)}
+                  placeholder="-- Pilih Kategori --"
+                  searchable={true}
+                  options={filteredCategories.map((c) => ({
+                    value: c.id,
+                    label: c.nama_kategori,
+                    badge: c.jenis === "MASUK" ? "Masuk" : "Keluar",
+                    badgeColor: c.jenis === "MASUK" ? "emerald" : "rose",
+                  }))}
+                />
               </div>
             </div>
+
+            {/* Inline Mini-Form: Tambah Kategori Baru Langsung */}
+            {showNewCategoryInline && (
+              <div className="rounded-xl border border-emerald-500/30 bg-slate-950 p-3 space-y-2.5 animate-in fade-in slide-in-from-top-1 shadow-lg">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                  <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                    <PlusCircle className="h-3.5 w-3.5 text-emerald-400" />
+                    Buat Kategori Kas Baru Langsung
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCategoryInline(false)}
+                    className="text-slate-400 hover:text-slate-200 text-xs px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="sm:col-span-2">
+                    <input
+                      type="text"
+                      placeholder="Nama kategori (contoh: Pemeliharaan Sarpras)"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <ModernSelect
+                      size="sm"
+                      value={newCategoryJenis}
+                      onChange={(val) => setNewCategoryJenis(val as KategoriJenis)}
+                      options={[
+                        { value: "MASUK", label: "MASUK (Pemasukan)", badge: "Masuk", badgeColor: "emerald" },
+                        { value: "KELUAR", label: "KELUAR (Pengeluaran)", badge: "Keluar", badgeColor: "rose" },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCategoryInline(false)}
+                    className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isCreatingCategory || !newCategoryName.trim()}
+                    onClick={() => handleCreateCategory(newCategoryName, newCategoryJenis)}
+                    className="flex items-center gap-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 text-xs font-bold transition disabled:opacity-50 active:scale-95"
+                  >
+                    {isCreatingCategory ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        <span>Menyimpan...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-3 w-3" />
+                        <span>Simpan & Pilih</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Notification if category was just created */}
+            {categorySuccessMsg && (
+              <div className="flex items-center gap-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 text-xs text-emerald-300 animate-in fade-in">
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+                <span>{categorySuccessMsg}</span>
+              </div>
+            )}
 
             {/* Nominal */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Nominal Transaksi (Rp)
+                Nominal Transaksi
               </label>
-              <input
-                type="number"
-                placeholder="Contoh: 500000"
-                value={nominal}
-                onChange={(e) => setNominal(e.target.value)}
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-semibold text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
-                min="1"
-                required
-                inputMode="numeric"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="Rp 0"
+                  value={nominalInput.displayValue}
+                  onChange={nominalInput.handleChange}
+                  className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm font-semibold text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none tracking-wide"
+                  required
+                />
+                {nominalInput.rawValue && (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">
+                    {parseInt(nominalInput.rawValue).toLocaleString("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 })}
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {[50000, 100000, 250000, 500000, 1000000].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => nominalInput.setFromRaw(val.toString())}
+                    className="rounded-lg border border-slate-800 bg-slate-950/80 px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:border-emerald-500/40 hover:text-emerald-300 transition active:scale-95"
+                  >
+                    +Rp {(val / 1000).toLocaleString("id-ID")}rb
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Keterangan */}
+            {/* Keterangan & Auto Kategori AI */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Keterangan</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300">Keterangan Transaksi</label>
+                <VoiceInputBtn
+                  onResult={(transcript) => setKeterangan(transcript)}
+                  onNominalDetected={(val) => nominalInput.setFromRaw(val.toString())}
+                  size="sm"
+                />
+              </div>
+
+              {/* Textarea Keterangan (Bersih, Responsif & Cepat) */}
               <textarea
-                placeholder="Rincian transaksi kas..."
+                placeholder="Rincian transaksi kas... atau gunakan Voice untuk input suara"
                 value={keterangan}
                 onChange={(e) => setKeterangan(e.target.value)}
                 rows={3}
-                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none resize-none"
+                className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm leading-relaxed text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none resize-none transition"
                 required
+              />
+
+              {/* Auto Category Detector & New Category Recommendation */}
+              <AIInputSuggester
+                keterangan={keterangan}
+                currentJenis={jenis}
+                currentKategoriId={kategoriId}
+                categories={localCategories}
+                apiKey={geminiApiKey}
+                model={geminiModel}
+                onApplyCategory={(catId, suggestedJenis) => {
+                  if (suggestedJenis) setJenis(suggestedJenis);
+                  setKategoriId(catId);
+                }}
+                onApplyKeterangan={(text) => setKeterangan(text)}
+                onRequestCreateCategory={(suggestedName, suggestedJenis) => {
+                  handleCreateCategory(
+                    suggestedName,
+                    suggestedJenis === "DEBIT" ? "MASUK" : "KELUAR"
+                  );
+                }}
+                isCreatingCategory={isCreatingCategory}
               />
             </div>
 
@@ -317,5 +546,17 @@ export function TransactionModal({
         </div>
       </div>
     </div>
+
+    {/* Camera Scan Modal */}
+    {geminiApiKey && (
+      <CameraScanModal
+        isOpen={isScanModalOpen}
+        onClose={() => setIsScanModalOpen(false)}
+        apiKey={geminiApiKey}
+        model={geminiModel}
+        onScanResult={handleScanResult}
+      />
+    )}
+    </>
   );
 }

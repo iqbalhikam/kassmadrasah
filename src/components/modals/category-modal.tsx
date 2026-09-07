@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Loader2, PlusCircle, AlertCircle } from "lucide-react";
 import { KategoriJenis } from "@/types";
 import { createCategoryAction } from "@/lib/actions";
+import { ModernSelect } from "@/components/ui/modern-select";
 
 interface CategoryModalProps {
   isOpen: boolean;
@@ -75,14 +76,14 @@ export function CategoryModal({ isOpen, onClose, onSuccess }: CategoryModalProps
             <label className="block text-xs font-semibold text-slate-300 mb-1">
               Jenis Kategori
             </label>
-            <select
+            <ModernSelect
               value={jenis}
-              onChange={(e) => setJenis(e.target.value as KategoriJenis)}
-              className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
-            >
-              <option value="MASUK">Pemasukan (MASUK)</option>
-              <option value="KELUAR">Pengeluaran (KELUAR)</option>
-            </select>
+              onChange={(val) => setJenis(val as KategoriJenis)}
+              options={[
+                { value: "MASUK", label: "Pemasukan (MASUK)", badge: "Masuk", badgeColor: "emerald" },
+                { value: "KELUAR", label: "Pengeluaran (KELUAR)", badge: "Keluar", badgeColor: "rose" },
+              ]}
+            />
           </div>
 
           <div>

@@ -10,13 +10,17 @@ import {
   deleteCategory,
   updateSettings,
   importBackupFromSpreadsheet,
+  updateGeminiApiKey,
+  updateGeminiAiSettings,
+  getGeminiApiKey,
 } from "@/lib/google/sheets";
-import { Transaksi, Kategori, Pengaturan } from "@/types";
+import { Transaksi, Kategori, Pengaturan, GeminiModelOption } from "@/types";
 import { generateId, extractSpreadsheetId } from "@/lib/utils";
+import { aiSettingsSchema } from "@/lib/validations/ai";
 
-export async function fetchDatabaseAction() {
+export async function fetchDatabaseAction(forceRefresh = false) {
   try {
-    const data = await getDatabaseData();
+    const data = await getDatabaseData(forceRefresh);
     return { success: true, data };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal mengambil data dari Google Sheets." };
@@ -48,6 +52,7 @@ export async function createTransactionAction(formData: FormData) {
     });
 
     revalidatePath("/dashboard");
+    revalidatePath("/report");
     return { success: true, id };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal menambahkan transaksi." };
@@ -78,6 +83,7 @@ export async function updateTransactionAction(id: string, formData: FormData) {
     });
 
     revalidatePath("/dashboard");
+    revalidatePath("/report");
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal memperbarui transaksi." };
@@ -88,6 +94,7 @@ export async function deleteTransactionAction(id: string) {
   try {
     await deleteTransaction(id);
     revalidatePath("/dashboard");
+    revalidatePath("/report");
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal menghapus transaksi." };
@@ -99,20 +106,22 @@ export async function createCategoryAction(formData: FormData) {
     const nama_kategori = formData.get("nama_kategori") as string;
     const jenis = formData.get("jenis") as "MASUK" | "KELUAR";
 
-    if (!nama_kategori) {
+    if (!nama_kategori || !nama_kategori.trim()) {
       throw new Error("Nama kategori harus diisi.");
     }
 
     const id = generateId("CAT");
-    await addCategory({
+    const newCategory: Kategori = {
       id,
-      nama_kategori,
+      nama_kategori: nama_kategori.trim(),
       jenis,
-    });
+    };
+
+    await addCategory(newCategory);
 
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/categories");
-    return { success: true };
+    return { success: true, id, category: newCategory };
   } catch (error: any) {
     return { success: false, error: error.message || "Gagal membuat kategori." };
   }
@@ -174,5 +183,36 @@ export async function restoreBackupAction(sheetUrl: string) {
       success: false,
       error: error.message || "Gagal melakukan impor/restore backup dari Google Sheets.",
     };
+  }
+}
+
+export async function saveGeminiAiSettingsAction(apiKey: string, model: string) {
+  try {
+    const validated = aiSettingsSchema.parse({ apiKey, model });
+    await updateGeminiAiSettings(validated.apiKey, validated.model);
+    revalidatePath("/dashboard");
+    revalidatePath("/dashboard/settings");
+    return { success: true, model: validated.model };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Gagal menyimpan Pengaturan Gemini AI." };
+  }
+}
+
+export async function saveGeminiApiKeyAction(apiKey: string) {
+  try {
+    await updateGeminiApiKey(apiKey);
+    revalidatePath("/dashboard/settings");
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Gagal menyimpan Gemini API Key." };
+  }
+}
+
+export async function getGeminiApiKeyAction() {
+  try {
+    const apiKey = await getGeminiApiKey();
+    return { success: true, apiKey };
+  } catch (error: any) {
+    return { success: false, error: error.message || "Gagal mengambil Gemini API Key.", apiKey: "" };
   }
 }

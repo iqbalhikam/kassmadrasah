@@ -1,6 +1,6 @@
 import { google } from "googleapis";
 import { getGoogleAuthClient } from "./auth";
-import { DatabaseData, Transaksi, Kategori, Pengaturan, CashFlowMonthly } from "@/types";
+import { DatabaseData, Transaksi, Kategori, Pengaturan, CashFlowMonthly, GeminiModelOption, DEFAULT_GEMINI_MODEL } from "@/types";
 import { generateId } from "@/lib/utils";
 
 const DB_FILE_NAME = "[DB] Kas Madrasah System";
@@ -17,10 +17,32 @@ const DEFAULT_CATEGORIES: Array<[string, string, string]> = [
   ["CAT-LAIN-OUT", "Pengeluaran Lainnya", "KELUAR"],
 ];
 
-const DEFAULT_SETTINGS = ["MA Universal Indonesia", "Bendahara", "Kepala Madrasah", "0"];
+const DEFAULT_SETTINGS = ["MA Universal Indonesia", "Bendahara", "Kepala Madrasah", "0", "", "gemini-3.7-flash"];
+
+// In-memory cache for user's spreadsheet ID (1 hour TTL) - avoids slow Drive file search
+const spreadsheetIdCache = new Map<string, { id: string; timestamp: number }>();
+
+// In-memory cache for user's DatabaseData (30s TTL) - gives instant SSR and sub-page navigations
+const databaseCache = new Map<string, { data: DatabaseData; timestamp: number }>();
+
+export function invalidateDatabaseCache(userEmail?: string) {
+  if (userEmail) {
+    databaseCache.delete(userEmail);
+  } else {
+    databaseCache.clear();
+  }
+}
 
 export async function getOrInitSpreadsheetId(): Promise<string> {
   const auth = await getGoogleAuthClient();
+  const userEmail = auth.userEmail || "default";
+
+  // Check cache first (1 hour TTL)
+  const cached = spreadsheetIdCache.get(userEmail);
+  if (cached && Date.now() - cached.timestamp < 3600_000) {
+    return cached.id;
+  }
+
   const drive = google.drive({ version: "v3", auth });
   const sheets = google.sheets({ version: "v4", auth });
 
@@ -32,7 +54,9 @@ export async function getOrInitSpreadsheetId(): Promise<string> {
   });
 
   if (searchRes.data.files && searchRes.data.files.length > 0) {
-    return searchRes.data.files[0].id!;
+    const foundId = searchRes.data.files[0].id!;
+    spreadsheetIdCache.set(userEmail, { id: foundId, timestamp: Date.now() });
+    return foundId;
   }
 
   // 2. If not found, create new Spreadsheet
@@ -70,28 +94,39 @@ export async function getOrInitSpreadsheetId(): Promise<string> {
           values: DEFAULT_CATEGORIES,
         },
         {
-          range: "Pengaturan!A1:D1",
-          values: [["nama_madrasah", "nama_bendahara", "nama_kepala_madrasah", "saldo_awal"]],
+          range: "Pengaturan!A1:F1",
+          values: [["nama_madrasah", "nama_bendahara", "nama_kepala_madrasah", "saldo_awal", "gemini_api_key", "gemini_model"]],
         },
         {
-          range: "Pengaturan!A2:D2",
+          range: "Pengaturan!A2:F2",
           values: [DEFAULT_SETTINGS],
         },
       ],
     },
   });
 
+  spreadsheetIdCache.set(userEmail, { id: spreadsheetId, timestamp: Date.now() });
   return spreadsheetId;
 }
 
-export async function getDatabaseData(): Promise<DatabaseData> {
+export async function getDatabaseData(forceRefresh = false): Promise<DatabaseData> {
   const auth = await getGoogleAuthClient();
+  const userEmail = auth.userEmail || "default";
+
+  // If not forcing refresh, check 30-second memory cache
+  if (!forceRefresh) {
+    const cached = databaseCache.get(userEmail);
+    if (cached && Date.now() - cached.timestamp < 30_000) {
+      return cached.data;
+    }
+  }
+
   const sheets = google.sheets({ version: "v4", auth });
   const spreadsheetId = await getOrInitSpreadsheetId();
 
   const response = await sheets.spreadsheets.values.batchGet({
     spreadsheetId,
-    ranges: ["Transaksi!A2:H1000", "Kategori!A2:C100", "Pengaturan!A2:D2"],
+    ranges: ["Transaksi!A2:H1000", "Kategori!A2:C100", "Pengaturan!A2:I2"],
   });
 
   const valueRanges = response.data.valueRanges || [];
@@ -134,11 +169,28 @@ export async function getDatabaseData(): Promise<DatabaseData> {
 
   // Parse Pengaturan
   const pengaturanRow = valueRanges[2]?.values?.[0] || DEFAULT_SETTINGS;
+  const rawModel = pengaturanRow[5];
+  const validModels: GeminiModelOption[] = [
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash",
+  ];
+  const gemini_model: GeminiModelOption = validModels.includes(rawModel as GeminiModelOption)
+    ? (rawModel as GeminiModelOption)
+    : DEFAULT_GEMINI_MODEL;
+
   const pengaturan: Pengaturan = {
     nama_madrasah: pengaturanRow[0] || "MA Universal Indonesia",
     nama_bendahara: pengaturanRow[1] || "Bendahara",
     nama_kepala_madrasah: pengaturanRow[2] || "Kepala Madrasah",
     saldo_awal: parseFloat(pengaturanRow[3] || "0") || 0,
+    gemini_api_key: pengaturanRow[4] || "",
+    gemini_model,
+    ai_analysis_result: pengaturanRow[6] || "",
+    ai_analysis_hash: pengaturanRow[7] || "",
+    ai_analysis_updated_at: pengaturanRow[8] || "",
   };
 
   // Calculate Summary
@@ -184,7 +236,7 @@ export async function getDatabaseData(): Promise<DatabaseData> {
     kredit: val.kredit,
   }));
 
-  return {
+  const result: DatabaseData = {
     transaksi,
     kategori,
     pengaturan,
@@ -197,6 +249,9 @@ export async function getDatabaseData(): Promise<DatabaseData> {
     },
     cashflow,
   };
+
+  databaseCache.set(userEmail, { data: result, timestamp: Date.now() });
+  return result;
 }
 
 export async function addTransaction(t: Omit<Transaksi, "created_at">): Promise<void> {
@@ -214,6 +269,8 @@ export async function addTransaction(t: Omit<Transaksi, "created_at">): Promise<
       values: [[t.id, t.tanggal, t.kategori_id, t.keterangan, t.jenis, t.nominal, t.bukti_url || "", createdAt]],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
 }
 
 export async function updateTransaction(t: Omit<Transaksi, "created_at"> & { created_at?: string }): Promise<void> {
@@ -248,6 +305,8 @@ export async function updateTransaction(t: Omit<Transaksi, "created_at"> & { cre
       values: [[t.id, t.tanggal, t.kategori_id, t.keterangan, t.jenis, t.nominal, t.bukti_url || "", createdAt]],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
@@ -288,6 +347,8 @@ export async function deleteTransaction(id: string): Promise<void> {
       ],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
 }
 
 export async function addCategory(k: Kategori): Promise<void> {
@@ -303,6 +364,8 @@ export async function addCategory(k: Kategori): Promise<void> {
       values: [[k.id, k.nama_kategori, k.jenis]],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
 }
 
 export async function deleteCategory(id: string): Promise<void> {
@@ -341,6 +404,8 @@ export async function deleteCategory(id: string): Promise<void> {
       ],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
 }
 
 export async function updateSettings(p: Pengaturan): Promise<void> {
@@ -350,12 +415,89 @@ export async function updateSettings(p: Pengaturan): Promise<void> {
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: "Pengaturan!A2:D2",
+    range: "Pengaturan!A2:F2",
     valueInputOption: "USER_ENTERED",
     requestBody: {
-      values: [[p.nama_madrasah, p.nama_bendahara, p.nama_kepala_madrasah, p.saldo_awal]],
+      values: [[
+        p.nama_madrasah,
+        p.nama_bendahara,
+        p.nama_kepala_madrasah,
+        p.saldo_awal,
+        p.gemini_api_key || "",
+        p.gemini_model || DEFAULT_GEMINI_MODEL,
+      ]],
     },
   });
+
+  invalidateDatabaseCache(auth.userEmail);
+}
+
+export async function updateGeminiAiSettings(apiKey: string, model: GeminiModelOption): Promise<void> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = await getOrInitSpreadsheetId();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: "Pengaturan!E2:F2",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[apiKey, model]],
+    },
+  });
+
+  invalidateDatabaseCache(auth.userEmail);
+}
+
+export async function updateAIAnalysisCache(
+  resultJson: string,
+  hash: string,
+  updatedAt: string
+): Promise<void> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = await getOrInitSpreadsheetId();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: "Pengaturan!G2:I2",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[resultJson, hash, updatedAt]],
+    },
+  });
+
+  invalidateDatabaseCache(auth.userEmail);
+}
+
+export async function updateGeminiApiKey(apiKey: string): Promise<void> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = await getOrInitSpreadsheetId();
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: "Pengaturan!E2",
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [[apiKey]],
+    },
+  });
+
+  invalidateDatabaseCache(auth.userEmail);
+}
+
+export async function getGeminiApiKey(): Promise<string> {
+  const auth = await getGoogleAuthClient();
+  const sheets = google.sheets({ version: "v4", auth });
+  const spreadsheetId = await getOrInitSpreadsheetId();
+
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: "Pengaturan!E2",
+  });
+
+  return res.data.values?.[0]?.[0] || "";
 }
 
 export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): Promise<{
@@ -513,6 +655,8 @@ export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): 
     });
     settingsUpdated = true;
   }
+
+  invalidateDatabaseCache(auth.userEmail);
 
   return {
     transactionsCount: finalTransaksiRows.length,
