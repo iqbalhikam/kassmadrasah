@@ -1,3 +1,5 @@
+import { ZodIssue } from "zod";
+
 export type TransaksiJenis = 'DEBIT' | 'KREDIT';
 export type KategoriJenis = 'MASUK' | 'KELUAR';
 
@@ -26,10 +28,15 @@ export type GeminiModelOption =
   | 'gemini-3.1-pro-preview'
   | 'gemini-2.5-flash';
 
+export type ActionResponse<T> = 
+  | { success: true; data: T }
+  | { success: false; error: string; issues?: ZodIssue[] };
+
 export interface GeminiModelInfo {
   id: GeminiModelOption;
   label: string;
   description: string;
+  badge?: string;
 }
 
 export const GEMINI_MODELS: GeminiModelInfo[] = [
@@ -37,26 +44,31 @@ export const GEMINI_MODELS: GeminiModelInfo[] = [
     id: 'gemini-3.7-flash',
     label: 'Gemini 3.7 Flash (Direkomendasikan - Paling Cepat & Responsif)',
     description: 'Paling cepat & responsif, optimal untuk scan nota instan dan transaksi harian.',
+    badge: 'Flash',
   },
   {
     id: 'gemini-3.5-flash',
     label: 'Gemini 3.5 Flash (Stabil & Cepat)',
     description: 'Stabil & cepat dengan akurasi tinggi untuk pemrosesan data kasir rutin.',
+    badge: 'Flash',
   },
   {
     id: 'gemini-3.5-flash-lite',
     label: 'Gemini 3.5 Flash-Lite (Hemat & Ringan)',
     description: 'Paling hemat kuota/token dan sangat ringan untuk koneksi terbatas.',
+    badge: 'Flash-Lite',
   },
   {
     id: 'gemini-3.1-pro-preview',
     label: 'Gemini 3.1 Pro (Analisis Kompleks & Reasoning)',
     description: 'Kemampuan reasoning tinggi, cocok untuk analisis laporan keuangan bulanan mendalam.',
+    badge: 'Pro',
   },
   {
     id: 'gemini-2.5-flash',
     label: 'Gemini 2.5 Flash (Versi Sebelumnya)',
     description: 'Versi stabil sebelumnya untuk kompatibilitas cadangan.',
+    badge: 'Flash',
   },
 ];
 
@@ -111,3 +123,4 @@ export interface DatabaseData {
   summary: KasSummary;
   cashflow: CashFlowMonthly[];
 }
+

@@ -14,16 +14,21 @@ import {
   updateGeminiAiSettings,
   getGeminiApiKey,
 } from "@/lib/google/sheets";
-import { Transaksi, Kategori, Pengaturan, GeminiModelOption } from "@/types";
+import {  Kategori } from "@/types";
 import { generateId, extractSpreadsheetId } from "@/lib/utils";
 import { aiSettingsSchema } from "@/lib/validations/ai";
 
 export async function fetchDatabaseAction(forceRefresh = false) {
   try {
     const data = await getDatabaseData(forceRefresh);
+    revalidatePath("/dashboard");
+    revalidatePath("/report");
+    revalidatePath("/dashboard/categories");
+    revalidatePath("/dashboard/settings");
     return { success: true, data };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal mengambil data dari Google Sheets." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal mengambil data dari Google Sheets.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -54,8 +59,9 @@ export async function createTransactionAction(formData: FormData) {
     revalidatePath("/dashboard");
     revalidatePath("/report");
     return { success: true, id };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menambahkan transaksi." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menambahkan transaksi.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -85,8 +91,9 @@ export async function updateTransactionAction(id: string, formData: FormData) {
     revalidatePath("/dashboard");
     revalidatePath("/report");
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal memperbarui transaksi." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal memperbarui transaksi.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -96,8 +103,9 @@ export async function deleteTransactionAction(id: string) {
     revalidatePath("/dashboard");
     revalidatePath("/report");
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menghapus transaksi." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menghapus transaksi.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -122,8 +130,9 @@ export async function createCategoryAction(formData: FormData) {
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/categories");
     return { success: true, id, category: newCategory };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal membuat kategori." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal membuat kategori.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -133,8 +142,9 @@ export async function deleteCategoryAction(id: string) {
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/categories");
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menghapus kategori." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menghapus kategori.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -155,8 +165,9 @@ export async function saveSettingsAction(formData: FormData) {
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/settings");
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menyimpan pengaturan." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menyimpan pengaturan.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -178,10 +189,11 @@ export async function restoreBackupAction(sheetUrl: string) {
       success: true,
       report: result,
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal melakukan impor/restore backup dari Google Sheets.";
     return {
       success: false,
-      error: error.message || "Gagal melakukan impor/restore backup dari Google Sheets.",
+      error: errorMessage,
     };
   }
 }
@@ -193,8 +205,9 @@ export async function saveGeminiAiSettingsAction(apiKey: string, model: string) 
     revalidatePath("/dashboard");
     revalidatePath("/dashboard/settings");
     return { success: true, model: validated.model };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menyimpan Pengaturan Gemini AI." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menyimpan Pengaturan Gemini AI.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -203,8 +216,9 @@ export async function saveGeminiApiKeyAction(apiKey: string) {
     await updateGeminiApiKey(apiKey);
     revalidatePath("/dashboard/settings");
     return { success: true };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal menyimpan Gemini API Key." };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal menyimpan Gemini API Key.";
+    return { success: false, error: errorMessage };
   }
 }
 
@@ -212,7 +226,8 @@ export async function getGeminiApiKeyAction() {
   try {
     const apiKey = await getGeminiApiKey();
     return { success: true, apiKey };
-  } catch (error: any) {
-    return { success: false, error: error.message || "Gagal mengambil Gemini API Key.", apiKey: "" };
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : "Gagal mengambil Gemini API Key.";
+    return { success: false, error: errorMessage, apiKey: "" };
   }
 }

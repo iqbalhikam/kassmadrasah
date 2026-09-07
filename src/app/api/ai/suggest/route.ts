@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json()) as SuggestRequestBody;
-    const { apiKey, model, keterangan, nominal, currentJenis, categories } = body;
+    const { apiKey, model, keterangan, currentJenis, categories } = body;
 
     if (!apiKey) {
       return NextResponse.json({ error: "API Key Gemini belum diset." }, { status: 400 });

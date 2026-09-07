@@ -1,4 +1,7 @@
-import { google } from "googleapis";
+import { google, Auth, sheets_v4 } from "googleapis";
+
+type KategoriJenis = "MASUK" | "KELUAR";
+type TransaksiJenis = "DEBIT" | "KREDIT";
 import { getGoogleAuthClient } from "./auth";
 import { DatabaseData, Transaksi, Kategori, Pengaturan, CashFlowMonthly, GeminiModelOption, DEFAULT_GEMINI_MODEL } from "@/types";
 import { generateId } from "@/lib/utils";
@@ -117,6 +120,7 @@ export async function getDatabaseData(forceRefresh = false): Promise<DatabaseDat
   if (!forceRefresh) {
     const cached = databaseCache.get(userEmail);
     if (cached && Date.now() - cached.timestamp < 30_000) {
+
       return cached.data;
     }
   }
@@ -141,7 +145,7 @@ export async function getDatabaseData(forceRefresh = false): Promise<DatabaseDat
     return {
       id,
       nama_kategori: nama,
-      jenis: (row[2] as any) || "MASUK",
+      jenis: (row[2] as KategoriJenis) || "MASUK",
     };
   });
 
@@ -153,7 +157,7 @@ export async function getDatabaseData(forceRefresh = false): Promise<DatabaseDat
     kategori_id: row[2] || "",
     kategori_nama: kategoriMap.get(row[2]) || row[2] || "Lainnya",
     keterangan: row[3] || "",
-    jenis: (row[4] as any) || "DEBIT",
+    jenis: (row[4] as TransaksiJenis) || "DEBIT",
     nominal: parseFloat(row[5] || "0") || 0,
     bukti_url: row[6] || "",
     created_at: row[7] || "",
@@ -285,7 +289,7 @@ export async function updateTransaction(t: Omit<Transaksi, "created_at"> & { cre
   });
 
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((row: any[]) => row[0] === t.id);
+  const rowIndex = rows.findIndex((row: (string | number)[]) => row[0] === t.id);
 
   if (rowIndex === -1) {
     throw new Error(`Transaksi ID ${t.id} tidak ditemukan.`);
@@ -321,7 +325,7 @@ export async function deleteTransaction(id: string): Promise<void> {
   });
 
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((row: any[]) => row[0] === id);
+  const rowIndex = rows.findIndex((row: (string | number)[]) => row[0] === id);
 
   if (rowIndex === -1) {
     throw new Error("Transaksi tidak ditemukan.");
@@ -379,7 +383,7 @@ export async function deleteCategory(id: string): Promise<void> {
   });
 
   const rows = res.data.values || [];
-  const rowIndex = rows.findIndex((row: any[]) => row[0] === id);
+  const rowIndex = rows.findIndex((row: (string | number)[]) => row[0] === id);
 
   if (rowIndex === -1) {
     throw new Error("Kategori tidak ditemukan.");
@@ -423,7 +427,7 @@ export async function updateSettings(p: Pengaturan): Promise<void> {
         p.nama_bendahara,
         p.nama_kepala_madrasah,
         p.saldo_awal,
-        p.gemini_api_key || "",
+                p.gemini_api_key || "",
         p.gemini_model || DEFAULT_GEMINI_MODEL,
       ]],
     },
@@ -513,20 +517,25 @@ export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): 
   let spreadsheetInfo;
   try {
     spreadsheetInfo = await sheets.spreadsheets.get({ spreadsheetId: sourceSpreadsheetId });
-  } catch (err: any) {
+  } catch (error: unknown) {
+    if (error instanceof Error) {
+      throw new Error(`Gagal membaca Google Sheet sumber. Pastikan ID/URL benar dan izin akses sudah publik/diberikan (Siapa saja yang memiliki link). Detail: ${error.message}`);
+    } else {
+      throw new Error("Gagal membaca Google Sheet sumber. Pastikan ID/URL benar dan izin akses sudah publik/diberikan (Siapa saja yang memiliki link).");
+    }
     throw new Error("Gagal membaca Google Sheet sumber. Pastikan ID/URL benar dan izin akses sudah publik/diberikan (Siapa saja yang memiliki link).");
   }
 
-  const sheetTabs = spreadsheetInfo.data.sheets || [];
-  const tabNames = sheetTabs.map((s: any) => s.properties?.title || "");
+  const sheetTabs: sheets_v4.Schema$Sheet[] = spreadsheetInfo.data.sheets || [];
+  const tabNames = sheetTabs.map((s: sheets_v4.Schema$Sheet) => s.properties?.title || "");
 
   if (tabNames.length === 0) {
     throw new Error("Google Sheet sumber tidak memiliki lembar kerja (sheet).");
   }
 
-  let finalTransaksiRows: any[][] = [];
-  let finalKategoriRows: any[][] = [];
-  let finalPengaturanRow: any[] | null = null;
+  let finalTransaksiRows: (string | number)[][] = [];
+  let finalKategoriRows: (string | number)[][] = [];
+  let finalPengaturanRow: (string | number)[] | null = null;
 
   const hasStandardTransaksi = tabNames.includes("Transaksi");
   const hasStandardKategori = tabNames.includes("Kategori");
@@ -562,9 +571,9 @@ export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): 
       range: `'${firstTabName}'!A1:Z3000`,
     });
 
-    const allRows = sheetRes.data.values || [];
+    const allRows: (string | number)[][] = sheetRes.data.values || [];
     if (allRows.length > 1) {
-      const headerRow = allRows[0].map((h: any) => String(h || "").toLowerCase().trim());
+      const headerRow = allRows[0].map((h: string | number) => String(h || "").toLowerCase().trim());
 
       // Auto-detect column indices by header text
       const tglCol = headerRow.findIndex((h: string) => /tgl|tanggal|date/.test(h));
@@ -665,14 +674,14 @@ export async function importBackupFromSpreadsheet(sourceSpreadsheetId: string): 
   };
 }
 
-function parseCleanNumber(val: any): number {
+function parseCleanNumber(val: unknown): number {
   if (!val) return 0;
   if (typeof val === "number") return val;
   const str = String(val).replace(/[^0-9.-]/g, "");
   return parseFloat(str) || 0;
 }
 
-function parseCleanDate(dateStr: any): string {
+function parseCleanDate(dateStr: unknown): string {
   if (!dateStr) return new Date().toISOString().split("T")[0];
   const trimmed = String(dateStr).trim();
   if (!trimmed) return new Date().toISOString().split("T")[0];
@@ -705,9 +714,9 @@ function parseCleanDate(dateStr: any): string {
   return new Date().toISOString().split("T")[0];
 }
 
-async function getSheetIdByName(spreadsheetId: string, sheetName: string, auth: any): Promise<number> {
+async function getSheetIdByName(spreadsheetId: string, sheetName: string, auth: Auth.OAuth2Client & { userEmail: string }): Promise<number> {
   const sheets = google.sheets({ version: "v4", auth });
   const res = await sheets.spreadsheets.get({ spreadsheetId });
-  const sheet = res.data.sheets?.find((s: any) => s.properties?.title === sheetName);
+  const sheet = res.data.sheets?.find((s: sheets_v4.Schema$Sheet) => s.properties?.title === sheetName);
   return sheet?.properties?.sheetId || 0;
 }

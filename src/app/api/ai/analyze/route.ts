@@ -7,6 +7,13 @@ import { DEFAULT_GEMINI_MODEL, GeminiModelOption, KasSummary, Transaksi } from "
 
 import { updateAIAnalysisCache } from "@/lib/google/sheets";
 
+interface AnalyzeResponse {
+  insight: string;
+  trend: string;
+  rekomendasi: string[];
+  kesimpulan: string;
+}
+
 interface CategorySpendingItem {
   nama: string;
   total: number;
@@ -82,16 +89,24 @@ Kembalikan HANYA JSON object murni valid tanpa markdown fence dengan format:
       { jsonMode: true, maxOutputTokens: 2048 }
     );
 
-    let cleanText = text
+    const cleanText = text
       .replace(/```(?:json)?\s*/gi, "")
       .replace(/```\s*$/g, "")
-      .replace(/[\u0000-\u001F\u007F]/g, (c) => c === "\n" || c === "\r" || c === "\t" ? c : "")
+      .replace(/[\u0000-\u001F\u007F]/g, (c) => {
+        // Preserve newline, carriage return, and tab; remove other control characters
+        if (c === "\n" || c === "\r" || c === "\t") {
+          return c;
+        }
+        // Replace other control characters with empty string
+        return "";
+      })
+      .replace(/\s+/g, " ") // Normalize multiple whitespace to single space
       .trim();
 
-    let parsed = {
+    let parsed: AnalyzeResponse = {
       insight: "",
       trend: "",
-      rekomendasi: [] as string[],
+      rekomendasi: [],
       kesimpulan: "",
     };
 
@@ -99,17 +114,17 @@ Kembalikan HANYA JSON object murni valid tanpa markdown fence dengan format:
       const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
       const jsonStr = jsonMatch ? jsonMatch[0] : cleanText;
       const cleanJsonStr = jsonStr.replace(/,\s*([}\]])/g, "$1");
-      const obj = JSON.parse(cleanJsonStr);
+      const obj = JSON.parse(cleanJsonStr) as Record<string, unknown>;
 
       parsed = {
         insight: typeof obj.insight === "string" ? obj.insight : "",
         trend: typeof obj.trend === "string" ? obj.trend : "",
         rekomendasi: Array.isArray(obj.rekomendasi)
-          ? obj.rekomendasi.filter((r: any) => typeof r === "string" && r.trim().length > 0)
+          ? obj.rekomendasi.filter((r: unknown) => typeof r === "string" && r.trim().length > 0)
           : [],
         kesimpulan: typeof obj.kesimpulan === "string" ? obj.kesimpulan : "",
       };
-    } catch {
+    } catch  {
       // Regex extraction fallback if JSON parser fails or text was slightly cut off
       const insightMatch = cleanText.match(/"insight"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
       const trendMatch = cleanText.match(/"trend"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
@@ -147,8 +162,8 @@ Kembalikan HANYA JSON object murni valid tanpa markdown fence dengan format:
     if (dataHash) {
       try {
         await updateAIAnalysisCache(JSON.stringify(parsed), dataHash, updatedAt);
-      } catch (saveErr) {
-        console.error("Gagal menyimpan cache analisis ke Google Sheets:", saveErr);
+      } catch (error: unknown) {
+        console.error("Gagal menyimpan cache analisis ke Google Sheets:", error instanceof Error ? error : String(error));
       }
     }
 

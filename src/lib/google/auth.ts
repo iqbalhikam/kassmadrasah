@@ -1,8 +1,13 @@
-import { google } from "googleapis";
+import { google, Auth } from "googleapis";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 
-export async function getGoogleAuthClient() {
+// Define a new interface that extends OAuth2Client with userEmail
+interface GoogleAuthClientWithUserEmail extends Auth.OAuth2Client {
+  userEmail: string;
+}
+
+export async function getGoogleAuthClient(): Promise<GoogleAuthClientWithUserEmail> {
   const session = await getServerSession(authOptions);
 
   if (!session || !session.accessToken) {
@@ -16,10 +21,14 @@ export async function getGoogleAuthClient() {
 
   oauth2Client.setCredentials({
     access_token: session.accessToken,
-    refresh_token: session.refreshToken,
+    ...(session.refreshToken && { refresh_token: session.refreshToken }),
   });
 
-  (oauth2Client as any).userEmail = session.user?.email || "default";
+  const authClientWithEmail = oauth2Client as GoogleAuthClientWithUserEmail;
+  if (!session.user?.email) {
+    throw new Error("UNAUTHORIZED: User email not found in session.");
+  }
+  authClientWithEmail.userEmail = session.user.email;
 
-  return oauth2Client as typeof oauth2Client & { userEmail: string };
+  return authClientWithEmail;
 }

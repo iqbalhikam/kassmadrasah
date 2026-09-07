@@ -371,9 +371,10 @@ export function ModernDatePicker({
             {calendarDays.map((item, idx) => {
               const isSelected = item.dateStr === value;
               const isToday = item.dateStr === todayStr;
-              const isDisabled =
+              const isDisabled = !!(
                 (minDate && item.dateStr < minDate) ||
-                (maxDate && item.dateStr > maxDate);
+                (maxDate && item.dateStr > maxDate)
+              );
 
               return (
                 <button

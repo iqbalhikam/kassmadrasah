@@ -1,6 +1,5 @@
 import { google } from "googleapis";
 import { getGoogleAuthClient } from "./auth";
-import { Readable } from "stream";
 
 const FOLDER_NAME = "[Nota Kas Madrasah]";
 
@@ -34,10 +33,6 @@ export async function uploadReceiptToDrive(
   }
 
   // 2. Upload file into folder
-  const stream = new Readable();
-  stream.push(fileBuffer);
-  stream.push(null);
-
   const fileRes = await drive.files.create({
     requestBody: {
       name: fileName,
@@ -45,12 +40,16 @@ export async function uploadReceiptToDrive(
     },
     media: {
       mimeType,
-      body: stream,
+      body: fileBuffer, // Pass buffer directly instead of creating a stream
     },
     fields: "id, webViewLink, webContentLink",
   });
 
-  const fileId = fileRes.data.id!;
+  const fileId = fileRes.data.id;
+  
+  if (!fileId) {
+    throw new Error("Gagal mengunggah berkas: File ID tidak diterima dari Google Drive");
+  }
 
   // 3. Make file readable by anyone with link
   try {
@@ -61,9 +60,10 @@ export async function uploadReceiptToDrive(
         type: "anyone",
       },
     });
-  } catch (err) {
-    console.warn("Gagal mengubah izin file ke publik:", err);
+  } catch (err: any) {
+    console.warn("Gagal mengubah izin file ke publik:", err.message || err);
   }
 
   return fileRes.data.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
+
 }
