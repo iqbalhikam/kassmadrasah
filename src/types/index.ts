@@ -94,11 +94,18 @@ export interface AIAnalysisResult {
   error?: string;
 }
 
+export interface ScanNotaItem {
+  keterangan: string;
+  nominal: number;
+  jenis?: 'DEBIT' | 'KREDIT';
+}
+
 export interface ScanNotaResult {
   nominal?: number;
   keterangan?: string;
   tanggal?: string;
   jenis?: 'DEBIT' | 'KREDIT';
+  items?: ScanNotaItem[]; // multiple items detected
   error?: string;
 }
 

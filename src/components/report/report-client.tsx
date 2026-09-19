@@ -173,12 +173,12 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
 
   // ── Preview Zoom state (auto-fits to screen on mobile/HP) ─────────────────
   const [zoom, setZoom] = useState(1);
+  const [fitZoom, setFitZoom] = useState(1);
 
   const calculateFitZoom = () => {
     if (typeof window === "undefined") return 1;
     const screenW = window.innerWidth;
     if (screenW < 850) {
-      // Auto fit with margin for mobile screen
       const fitted = Math.min(1, Math.max(0.25, (screenW - 28) / 794));
       return Math.round(fitted * 100) / 100;
     }
@@ -186,39 +186,130 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
   };
 
   useEffect(() => {
-    const updateZoom = () => setZoom(calculateFitZoom());
+    const updateZoom = () => {
+      const fz = calculateFitZoom();
+      setFitZoom(fz);
+      setZoom(fz);
+    };
     updateZoom();
     window.addEventListener("resize", updateZoom);
     return () => window.removeEventListener("resize", updateZoom);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleZoomIn = () => setZoom((z) => Math.min(1.5, Math.round((z + 0.1) * 100) / 100));
+  const handleZoomIn = () => setZoom((z) => Math.min(3, Math.round((z + 0.1) * 100) / 100));
   const handleZoomOut = () => setZoom((z) => Math.max(0.25, Math.round((z - 0.1) * 100) / 100));
-  const handleFitScreen = () => setZoom(calculateFitZoom());
+  const handleFitScreen = () => setZoom(fitZoom);
   const handleResetZoom = () => setZoom(1);
 
-  // ── Drag to scroll (mouse/trackpad support) ───────────────────────────────
+  // Apakah zoom sudah berubah dari fit (untuk menampilkan floating reset button)
+  const isZoomedFromFit = Math.abs(zoom - fitZoom) > 0.02;
+
+  // ── Scroll container ref ──────────────────────────────────────────────────
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [scrollLeftState, setScrollLeftState] = useState(0);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!scrollContainerRef.current) return;
-    setIsDragging(true);
-    setStartX(e.pageX - scrollContainerRef.current.offsetLeft);
-    setScrollLeftState(scrollContainerRef.current.scrollLeft);
-  };
+  // ── Pinch-to-zoom + drag scroll via Pointer Events ───────────────────────
+  // Semua state disimpan di ref agar tidak trigger re-render saat gesture
+  const dragRef = useRef({
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    scrollLeft: 0,
+    scrollTop: 0,
+  });
+  const pinchRef = useRef({
+    active: false,
+    initialDist: 0,
+    initialZoom: 1,
+    pointersMap: new Map<number, PointerEvent>(),
+  });
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging || !scrollContainerRef.current) return;
-    e.preventDefault();
-    const x = e.pageX - scrollContainerRef.current.offsetLeft;
-    const walk = (x - startX) * 1.5;
-    scrollContainerRef.current.scrollLeft = scrollLeftState - walk;
-  };
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
 
-  const handleMouseUp = () => setIsDragging(false);
+    const getDistance = (a: PointerEvent, b: PointerEvent) =>
+      Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+    const onPointerDown = (e: PointerEvent) => {
+      el.setPointerCapture(e.pointerId);
+      pinchRef.current.pointersMap.set(e.pointerId, e);
+
+      if (pinchRef.current.pointersMap.size === 2) {
+        // Dua jari terdeteksi → mode pinch zoom
+        pinchRef.current.active = true;
+        dragRef.current.isDragging = false;
+        const [a, b] = [...pinchRef.current.pointersMap.values()] as [PointerEvent, PointerEvent];
+        pinchRef.current.initialDist = Math.hypot(
+          a.clientX - b.clientX,
+          a.clientY - b.clientY
+        );
+        pinchRef.current.initialZoom = zoom;
+      } else if (pinchRef.current.pointersMap.size === 1) {
+        // Satu jari → mode drag scroll
+        dragRef.current.isDragging = true;
+        dragRef.current.startX = e.clientX;
+        dragRef.current.startY = e.clientY;
+        dragRef.current.scrollLeft = el.scrollLeft;
+        dragRef.current.scrollTop = el.scrollTop;
+      }
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      pinchRef.current.pointersMap.set(e.pointerId, e);
+
+      if (pinchRef.current.active && pinchRef.current.pointersMap.size === 2) {
+        // Pinch zoom
+        e.preventDefault();
+        const [a, b] = [...pinchRef.current.pointersMap.values()] as [PointerEvent, PointerEvent];
+        const dist = getDistance(a, b);
+        if (pinchRef.current.initialDist === 0) return;
+        const scale = dist / pinchRef.current.initialDist;
+        const newZoom = Math.min(3, Math.max(0.25,
+          Math.round(pinchRef.current.initialZoom * scale * 100) / 100
+        ));
+        setZoom(newZoom);
+      } else if (dragRef.current.isDragging && pinchRef.current.pointersMap.size === 1) {
+        // Drag scroll satu jari
+        const dx = e.clientX - dragRef.current.startX;
+        const dy = e.clientY - dragRef.current.startY;
+        el.scrollLeft = dragRef.current.scrollLeft - dx;
+        el.scrollTop = dragRef.current.scrollTop - dy;
+      }
+    };
+
+    const onPointerUp = (e: PointerEvent) => {
+      pinchRef.current.pointersMap.delete(e.pointerId);
+      if (pinchRef.current.pointersMap.size < 2) {
+        pinchRef.current.active = false;
+      }
+      if (pinchRef.current.pointersMap.size === 0) {
+        dragRef.current.isDragging = false;
+      }
+    };
+
+    // ── Ctrl + Scroll Wheel zoom (laptop/desktop) ─────────────────────────
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      setZoom((z) => Math.min(3, Math.max(0.25, Math.round((z + delta) * 100) / 100)));
+    };
+
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove, { passive: false });
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerUp);
+    el.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerUp);
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [zoom]);
 
   useEffect(() => {
     if (initialData) return;
@@ -265,8 +356,8 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
           const raw = Reflect.get(target, prop, target);
           if (typeof raw === "string") return sanitizeColor(raw);
           if (typeof raw === "function") {
-            return (...args: any[]) => {
-              const result = (raw as Function).apply(target, args);
+            return (...args: unknown[]) => {
+              const result = (raw as (...args: any[]) => any).apply(target, args);
               return typeof result === "string" ? sanitizeColor(result) : result;
             };
           }
@@ -701,38 +792,66 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
           <ZoomIn className="h-3.5 w-3.5" />
         </button>
 
-        <div className="mx-1 h-4 w-px bg-slate-700" />
+        {/* Tampilkan separator + tombol reset hanya saat zoom berubah */}
+        {isZoomedFromFit && (
+          <>
+            <div className="mx-1 h-4 w-px bg-slate-700" />
 
-        <button
-          onClick={handleFitScreen}
-          className="flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition active:scale-95"
-          title="Paskan ke Layar HP"
-        >
-          <Maximize2 className="h-3 w-3 text-emerald-400" />
-          <span>Fit HP</span>
-        </button>
+            {Math.abs(zoom - fitZoom) > 0.02 && (
+              <button
+                onClick={handleFitScreen}
+                className="flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-slate-700 hover:text-white transition active:scale-95"
+                title="Paskan ke Layar HP"
+              >
+                <Maximize2 className="h-3 w-3 text-emerald-400" />
+                <span>Fit</span>
+              </button>
+            )}
 
-        <button
-          onClick={handleResetZoom}
-          className="flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:bg-slate-700 hover:text-white transition active:scale-95"
-          title="Ukuran Asli 100%"
-        >
-          <RotateCcw className="h-3 w-3 text-indigo-400" />
-          <span>100%</span>
-        </button>
+            {Math.abs(zoom - 1) > 0.02 && (
+              <button
+                onClick={handleResetZoom}
+                className="flex items-center gap-1 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-indigo-300 hover:bg-slate-700 hover:text-white transition active:scale-95"
+                title="Ukuran Asli 100%"
+              >
+                <RotateCcw className="h-3 w-3 text-indigo-400" />
+                <span>100%</span>
+              </button>
+            )}
+          </>
+        )}
       </div>
 
-      {/* ── Printable Report Document Container (Pan / Drag / Scroll enabled) ── */}
+      {/* ── Floating Reset Zoom Button (muncul saat zoom ≠ fit) ── */}
+      {isZoomedFromFit && (
+        <div className="no-print fixed bottom-6 right-4 z-50 flex flex-col gap-2 items-end">
+          <button
+            onClick={handleFitScreen}
+            className="flex items-center gap-1.5 rounded-full border border-slate-600/80 bg-slate-900/95 px-3.5 py-2 text-[11px] font-bold text-emerald-300 shadow-2xl backdrop-blur-md hover:bg-slate-800 active:scale-95 transition"
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            Fit Layar
+          </button>
+          <button
+            onClick={handleResetZoom}
+            className="flex items-center gap-1.5 rounded-full border border-slate-600/80 bg-slate-900/95 px-3.5 py-2 text-[11px] font-bold text-indigo-300 shadow-2xl backdrop-blur-md hover:bg-slate-800 active:scale-95 transition"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset 100%
+          </button>
+        </div>
+      )}
+
+      {/* ── Printable Report Document Container (Pinch-Zoom + Scroll) ── */}
       <div
         ref={scrollContainerRef}
-        className="mx-auto w-full overflow-x-auto pb-8 touch-pan-x cursor-grab active:cursor-grabbing select-none sm:select-auto"
+        className="mx-auto w-full pb-8 select-none sm:select-auto"
         style={{
+          overflow: "auto",
           WebkitOverflowScrolling: "touch",
+          touchAction: "pan-x pan-y",
+          cursor: "grab",
         }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
       >
         <div style={{ width: "fit-content", minWidth: "100%", display: "flex", justifyContent: "center", padding: "0 16px" }}>
           <div
@@ -994,13 +1113,20 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                       <div style={{ borderRadius: "10px", border: "1px solid #cbd5e1", overflow: "hidden" }}>
                         <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", textAlign: "left", fontSize: "11px", color: "#0f172a", fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif" }}>
                           <colgroup>
-                            <col style={{ width: "30px" }} />
-                            <col style={{ width: "105px" }} />
-                            <col style={{ width: "110px" }} />
-                            <col />
-                            <col style={{ width: "60px" }} />
-                            <col style={{ width: "112px" }} />
-                            <col style={{ width: "115px" }} />
+                            {/* No */}
+                            <col style={{ width: "4%" }} />
+                            {/* Tanggal – cukup untuk "27 Agustus 2026" */}
+                            <col style={{ width: "14%" }} />
+                            {/* Kategori – bisa wrap jika panjang */}
+                            <col style={{ width: "18%" }} />
+                            {/* Keterangan – sisa ruang terbesar */}
+                            <col style={{ width: "28%" }} />
+                            {/* Jenis badge */}
+                            <col style={{ width: "8%" }} />
+                            {/* Nominal */}
+                            <col style={{ width: "14%" }} />
+                            {/* Saldo */}
+                            <col style={{ width: "14%" }} />
                           </colgroup>
                           <thead>
                             <tr style={{ backgroundColor: "#f1f5f9", fontSize: "11px", fontWeight: 700, textTransform: "uppercase", color: "#334155", letterSpacing: "0.3px" }}>
@@ -1020,10 +1146,10 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                               const saldo = runningBalanceMap.get(tx.id) ?? 0;
                               return (
                                 <tr key={tx.id} style={{ backgroundColor: idx % 2 === 1 ? "#f8fafc" : "#ffffff", fontSize: "11px" }}>
-                                  <td style={{ padding: "6px 4px 6px 6px", border: "1px solid #e2e8f0", color: "#64748b", fontSize: "11px", textAlign: "center" }}>{rowNumber}</td>
-                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", fontWeight: 500, fontSize: "11px", wordBreak: "keep-all" }}>{formatTanggal(tx.tanggal)}</td>
-                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "11px" }}>{tx.kategori_nama || tx.kategori_id}</td>
-                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", lineHeight: "1.35", fontSize: "11px" }}>{tx.keterangan}</td>
+                                  <td style={{ padding: "6px 4px 6px 6px", border: "1px solid #e2e8f0", color: "#64748b", fontSize: "11px", textAlign: "center", verticalAlign: "top" }}>{rowNumber}</td>
+                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", fontWeight: 500, fontSize: "11px", wordBreak: "break-word", whiteSpace: "normal", lineHeight: "1.4", verticalAlign: "top" }}>{formatTanggal(tx.tanggal)}</td>
+                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", fontWeight: 600, wordBreak: "break-word", whiteSpace: "normal", lineHeight: "1.4", fontSize: "11px", verticalAlign: "top" }}>{tx.kategori_nama || tx.kategori_id}</td>
+                                  <td style={{ padding: "6px", border: "1px solid #e2e8f0", lineHeight: "1.4", fontSize: "11px", wordBreak: "break-word", whiteSpace: "normal", verticalAlign: "top" }}>{tx.keterangan}</td>
                                   <td style={{ padding: "6px 4px", border: "1px solid #e2e8f0", verticalAlign: "middle" }}>
                                     <div data-badge-wrap="jenis" style={{ width: "100%", textAlign: "center" }}>
                                       <span style={{

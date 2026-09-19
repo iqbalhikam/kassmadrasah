@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useId } from "react";
 import { ChevronDown, Check, Search, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export interface SelectOption {
   value: string;
@@ -30,6 +31,26 @@ export interface ModernSelectProps {
   required?: boolean;
   allowClear?: boolean;
 }
+
+type AccentColor = NonNullable<ModernSelectProps["accentColor"]>;
+type Size = NonNullable<ModernSelectProps["size"]>;
+
+const SIZE_CLASSES: Record<Size, string> = {
+  sm: "px-2.5 py-1.5 text-xs rounded-lg min-h-[34px]",
+  md: "px-3 py-2.5 text-sm rounded-xl min-h-[42px]",
+};
+
+const ACCENT_BORDER_FOCUS: Record<AccentColor, string> = {
+  emerald: "border-emerald-500 ring-1 ring-emerald-500/30",
+  violet:  "border-violet-500 ring-1 ring-violet-500/30",
+  indigo:  "border-indigo-500 ring-1 ring-indigo-500/30",
+};
+
+const ACCENT_ITEM_ACTIVE: Record<AccentColor, string> = {
+  emerald: "bg-emerald-500/10 text-emerald-300 font-semibold",
+  violet:  "bg-violet-500/10 text-violet-300 font-semibold",
+  indigo:  "bg-indigo-500/10 text-indigo-300 font-semibold",
+};
 
 const badgeColorMap: Record<string, string> = {
   emerald: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
@@ -94,13 +115,17 @@ export function ModernSelect({
 
   // Focus search input saat dropdown terbuka
   useEffect(() => {
+    let timer: NodeJS.Timeout;
     if (isOpen && isSearchable) {
-      setTimeout(() => {
+      timer = setTimeout(() => {
         searchInputRef.current?.focus();
       }, 50);
-    } else {
-      setSearchQuery("");
+    } else if (!isOpen) {
+      timer = setTimeout(() => {
+        setSearchQuery("");
+      }, 0);
     }
+    return () => clearTimeout(timer);
   }, [isOpen, isSearchable]);
 
   // Handle keyboard navigation (Escape to close)
@@ -114,25 +139,13 @@ export function ModernSelect({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  const accentBorderFocus = {
-    emerald: "focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30",
-    violet: "focus:border-violet-500 focus:ring-1 focus:ring-violet-500/30",
-    indigo: "focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30",
-  }[accentColor];
-
-  const accentItemActive = {
-    emerald: "bg-emerald-500/10 text-emerald-300 font-semibold",
-    violet: "bg-violet-500/10 text-violet-300 font-semibold",
-    indigo: "bg-indigo-500/10 text-indigo-300 font-semibold",
-  }[accentColor];
-
-  const sizeClasses = {
-    sm: "px-2.5 py-1.5 text-xs rounded-lg min-h-[34px]",
-    md: "px-3 py-2.5 text-sm rounded-xl min-h-[42px]",
-  }[size];
+  // Resolved per-instance values from typed maps
+  const sizeClasses    = SIZE_CLASSES[size];
+  const accentActive   = ACCENT_ITEM_ACTIVE[accentColor];
+  const accentFocusBdr = ACCENT_BORDER_FOCUS[accentColor];
 
   return (
-    <div ref={containerRef} className={`relative w-full ${className}`}>
+    <div ref={containerRef} className={cn("relative w-full", className)}>
       {/* Hidden input untuk form submit support jika dibutuhkan */}
       {name && (
         <input
@@ -151,11 +164,13 @@ export function ModernSelect({
         onClick={() => !disabled && setIsOpen((prev) => !prev)}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        className={`w-full flex items-center justify-between gap-2 border bg-slate-950 text-left transition select-none ${sizeClasses} ${
-          isOpen
-            ? accentBorderFocus + " border-emerald-500"
-            : "border-slate-800 hover:border-slate-700"
-        } ${disabled ? "opacity-50 cursor-not-allowed bg-slate-900" : "cursor-pointer"} ${buttonClassName}`}
+        className={cn(
+          "w-full flex items-center justify-between gap-2 border bg-slate-950 text-left transition select-none",
+          sizeClasses,
+          isOpen ? accentFocusBdr : "border-slate-800 hover:border-slate-700",
+          disabled ? "opacity-50 cursor-not-allowed bg-slate-900" : "cursor-pointer",
+          buttonClassName,
+        )}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
           {selectedOption ? (
@@ -186,12 +201,10 @@ export function ModernSelect({
             <span
               role="button"
               tabIndex={0}
-              onClick={(e) => {
-                e.stopPropagation();
-                onChange("");
-              }}
+              aria-label="Hapus pilihan"
+              onClick={(e) => { e.stopPropagation(); onChange(""); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); onChange(""); } }}
               className="p-0.5 hover:text-slate-200 hover:bg-slate-800 rounded transition"
-              title="Hapus pilihan"
             >
               <X className="h-3.5 w-3.5" />
             </span>
@@ -208,7 +221,10 @@ export function ModernSelect({
       {isOpen && (
         <div
           role="listbox"
-          className={`absolute left-0 right-0 mt-1.5 z-50 rounded-xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 ${menuClassName}`}
+          className={cn(
+            "absolute left-0 right-0 mt-1.5 z-50 rounded-xl border border-slate-700/80 bg-slate-900/95 backdrop-blur-xl shadow-2xl overflow-hidden animate-dropdown-in",
+            menuClassName,
+          )}
           style={{ maxHeight: "280px" }}
         >
           {/* Search Box jika list banyak atau searchable=true */}
@@ -256,13 +272,14 @@ export function ModernSelect({
                       onChange(opt.value);
                       setIsOpen(false);
                     }}
-                    className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition select-none ${
+                    className={cn(
+                      "flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs cursor-pointer transition select-none",
                       opt.disabled
                         ? "opacity-40 cursor-not-allowed"
                         : isSelected
-                        ? accentItemActive
-                        : "text-slate-300 hover:bg-slate-800/80 hover:text-slate-100"
-                    }`}
+                          ? accentActive
+                          : "text-slate-300 hover:bg-slate-800/80 hover:text-slate-100",
+                    )}
                   >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
                       {opt.icon && <span className="shrink-0">{opt.icon}</span>}

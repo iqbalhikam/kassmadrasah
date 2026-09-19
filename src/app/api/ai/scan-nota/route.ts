@@ -29,21 +29,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Gambar nota tidak ditemukan." }, { status: 400 });
     }
 
-    // Validate model option safely via Zod, fallback to DEFAULT_GEMINI_MODEL
     const modelParsed = geminiModelSchema.safeParse(model);
     const activeModel: GeminiModelOption = modelParsed.success ? modelParsed.data : DEFAULT_GEMINI_MODEL;
 
-    const prompt = `Kamu adalah asisten OCR untuk nota/kuitansi keuangan madrasah. Baca gambar nota/kuitansi/struk ini dan ekstrak informasinya.
+    const prompt = `Kamu adalah asisten OCR untuk nota/kuitansi keuangan madrasah. Baca gambar nota/kuitansi/struk ini dan ekstrak SEMUA item transaksi yang ada.
 
-Kembalikan HANYA JSON (tanpa markdown) dengan format:
-{"nominal":angka_tanpa_titik_koma,"keterangan":"deskripsi singkat transaksi","tanggal":"YYYY-MM-DD atau kosong jika tidak ada","jenis":"DEBIT atau KREDIT"}
+Kembalikan HANYA JSON (tanpa markdown, tanpa penjelasan) dengan format persis:
+{
+  "tanggal": "YYYY-MM-DD atau string kosong jika tidak ada",
+  "jenis": "DEBIT atau KREDIT",
+  "items": [
+    {"keterangan": "nama/deskripsi item", "nominal": 50000, "jenis": "KREDIT"},
+    {"keterangan": "nama/deskripsi item 2", "nominal": 25000, "jenis": "KREDIT"}
+  ],
+  "nominal_total": 75000,
+  "keterangan": "ringkasan singkat keseluruhan nota maksimal 80 karakter"
+}
 
-Aturan:
-- nominal: angka saja, tanpa Rp, titik, atau koma
-- keterangan: ringkasan singkat isi nota (maks 80 karakter)
-- tanggal: format YYYY-MM-DD, kosongkan jika tidak terdeteksi
-- jenis: KREDIT (pengeluaran/pembelian) atau DEBIT (penerimaan/pembayaran masuk)
-- Jika tidak bisa membaca, kembalikan: {"error":"Tidak dapat membaca nota"}`;
+Aturan penting:
+- Ekstrak SETIAP baris item yang ada di nota (nama barang, harga satuan x qty, subtotal dsb.)
+- nominal: angka integer saja, TANPA Rp, titik, atau koma desimal
+- Jika nota hanya 1 item atau tidak ada rincian, tetap gunakan format items (array 1 elemen)
+- tanggal: format YYYY-MM-DD, string kosong jika tidak terdeteksi
+- jenis KREDIT = pengeluaran/pembelian/keluar, DEBIT = penerimaan/pemasukan/masuk
+- Jika gambar tidak terbaca atau bukan nota: {"error": "Tidak dapat membaca nota", "items": [], "nominal_total": 0, "keterangan": "", "tanggal": "", "jenis": "KREDIT"}`;
 
     const text = await callGemini(apiKey, activeModel, [
       { text: prompt },

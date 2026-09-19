@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useCurrencyInput } from "@/hooks/useCurrencyInput";
 import { X, Upload, Loader2, CheckCircle2, AlertCircle, Edit3, ScanLine, Plus, PlusCircle, Check } from "lucide-react";
-import { Kategori, KategoriJenis, Transaksi, TransaksiJenis, ScanNotaResult, GeminiModelOption } from "@/types";
+import { Kategori, KategoriJenis, Transaksi, TransaksiJenis, ScanNotaResult, ScanNotaItem, GeminiModelOption } from "@/types";
 import { createTransactionAction, updateTransactionAction, createCategoryAction } from "@/lib/actions";
 import { VoiceInputBtn } from "@/components/ai/voice-input-btn";
 import { CameraScanModal } from "@/components/ai/camera-scan-modal";
@@ -32,56 +32,126 @@ export function TransactionModal({
   geminiModel,
   onCategoryCreated,
 }: TransactionModalProps) {
-  const [jenis, setJenis] = useState<TransaksiJenis>("DEBIT");
-  const [tanggal, setTanggal] = useState(new Date().toISOString().split("T")[0]);
-  const [kategoriId, setKategoriId] = useState("");
-  const [keterangan, setKeterangan] = useState("");
-  const nominalInput = useCurrencyInput({ initial: "" });
+  const getDefaultForm = (tx?: Transaksi | null) => ({
+    jenis: (tx?.jenis ?? "DEBIT") as TransaksiJenis,
+    tanggal: tx?.tanggal ?? new Date().toISOString().split("T")[0],
+    kategoriId: tx?.kategori_id ?? "",
+    keterangan: tx?.keterangan ?? "",
+  });
+
+  const [form, setForm] = useState(() => getDefaultForm(editingTransaction));
+  const jenis = form.jenis;
+  const tanggal = form.tanggal;
+  const kategoriId = form.kategoriId;
+  const keterangan = form.keterangan;
+  const setJenis = (v: TransaksiJenis) => setForm(f => ({ ...f, jenis: v }));
+  const setTanggal = (v: string) => setForm(f => ({ ...f, tanggal: v }));
+  const setKategoriId = (v: string) => setForm(f => ({ ...f, kategoriId: v }));
+  const setKeterangan = (v: string) => setForm(f => ({ ...f, keterangan: v }));
+  const nominalInput = useCurrencyInput({ initial: editingTransaction?.nominal?.toString() ?? "" });
 
   // Categories state with local updates for instant category creation
-  const [localCategories, setLocalCategories] = useState<Kategori[]>(categories);
-  const [showNewCategoryInline, setShowNewCategoryInline] = useState(false);
+  const [extraCategories, setExtraCategories] = useState<Kategori[]>([]);
+  const localCategories = useMemo(
+    () => [...categories, ...extraCategories],
+    [categories, extraCategories]
+  );
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newCategoryJenis, setNewCategoryJenis] = useState<KategoriJenis>("MASUK");
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
-  const [categorySuccessMsg, setCategorySuccessMsg] = useState("");
 
-  const [file, setFile] = useState<File | null>(null);
-  const [existingBuktiUrl, setExistingBuktiUrl] = useState("");
+  // ── UI flags consolidated into one object so the reset effect has a single setState call ──
+  const [uiState, setUiState] = useState({
+    file: null as File | null,
+    existingBuktiUrl: "",
+    errorMsg: "",
+    showNewCategoryInline: false,
+    categorySuccessMsg: "",
+  });
+  const file = uiState.file;
+  const existingBuktiUrl = uiState.existingBuktiUrl;
+  const errorMsg = uiState.errorMsg;
+  const showNewCategoryInline = uiState.showNewCategoryInline;
+  const categorySuccessMsg = uiState.categorySuccessMsg;
+  const setFile = (v: File | null) => setUiState(s => ({ ...s, file: v }));
+  const setErrorMsg = (v: string) => setUiState(s => ({ ...s, errorMsg: v }));
+  const setShowNewCategoryInline = (v: boolean) => setUiState(s => ({ ...s, showNewCategoryInline: v }));
+  const setCategorySuccessMsg = (v: string) => setUiState(s => ({ ...s, categorySuccessMsg: v }));
+
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
 
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
 
-  // Sync with incoming categories
-  useEffect(() => {
-    setLocalCategories(categories);
-  }, [categories]);
+  // ── Multi-scan queue (mode Pisah Per Item) ───────────────────────────────
+  const [multiQueue, setMultiQueue] = useState<ScanNotaItem[]>([]);
+  const [multiQueueIdx, setMultiQueueIdx] = useState(0);
+  const [multiTanggal, setMultiTanggal] = useState("");
 
-  useEffect(() => {
+
+
+  // Track previous props to reset state during render (avoids cascading renders from useEffect)
+  const [prevEditingTx, setPrevEditingTx] = useState(editingTransaction);
+  const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
+
+  if (editingTransaction !== prevEditingTx || isOpen !== prevIsOpen) {
+    setPrevEditingTx(editingTransaction);
+    setPrevIsOpen(isOpen);
+    
+    setForm(getDefaultForm(editingTransaction));
+    setUiState({
+      file: null,
+      existingBuktiUrl: editingTransaction?.bukti_url ?? "",
+      errorMsg: "",
+      showNewCategoryInline: false,
+      categorySuccessMsg: "",
+    });
+    
     if (editingTransaction) {
-      setJenis(editingTransaction.jenis || "DEBIT");
-      setTanggal(editingTransaction.tanggal || new Date().toISOString().split("T")[0]);
-      setKategoriId(editingTransaction.kategori_id || "");
-      setKeterangan(editingTransaction.keterangan || "");
       nominalInput.setFromRaw(editingTransaction.nominal ? editingTransaction.nominal.toString() : "");
-      setExistingBuktiUrl(editingTransaction.bukti_url || "");
-      setFile(null);
     } else {
-      setJenis("DEBIT");
-      setTanggal(new Date().toISOString().split("T")[0]);
-      setKategoriId("");
-      setKeterangan("");
       nominalInput.reset();
-      setExistingBuktiUrl("");
-      setFile(null);
     }
+  }
+
+  // ── Animate-out support ────────────────────────────────────────────────────
+  const [isAnimatingOut, setIsAnimatingOut] = useState(false);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleClose = useCallback(() => {
+    setIsAnimatingOut(true);
+    closeTimerRef.current = setTimeout(() => {
+      setIsAnimatingOut(false);
+      onClose();
+    }, 320);
+  }, [onClose]);
+
+  // Cleanup timer on unmount
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
+
+  // ── Multi-scan queue helpers ── must be declared before early return so hooks
+  //    are always called in the same order on every render (Rules of Hooks).
+  const loadQueueItem = useCallback((items: ScanNotaItem[], idx: number, tanggal: string) => {
+    const item = items[idx];
+    if (!item) return;
+    nominalInput.setFromRaw(item.nominal.toString());
+    setKeterangan(item.keterangan || "");
+    if (tanggal) setTanggal(tanggal);
+    if (item.jenis) setJenis(item.jenis);
+    else setJenis("KREDIT");
+    setKategoriId("");
     setErrorMsg("");
-    setShowNewCategoryInline(false);
-    setCategorySuccessMsg("");
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editingTransaction, isOpen]);
+  }, [nominalInput]);
+
+  const handleMultiScanResult = useCallback((
+    items: ScanNotaItem[], tanggal: string
+  ) => {
+    setMultiQueue(items);
+    setMultiQueueIdx(0);
+    setMultiTanggal(tanggal);
+    loadQueueItem(items, 0, tanggal);
+    setIsScanModalOpen(false);
+  }, [loadQueueItem]);
 
   // Handle direct category creation (from inline form or from AI recommendation)
   const handleCreateCategory = async (nama: string, jenisKategori: KategoriJenis) => {
@@ -99,7 +169,7 @@ export function TransactionModal({
       }
 
       const createdCat = res.category;
-      setLocalCategories((prev) => {
+      setExtraCategories((prev) => {
         if (prev.some((c) => c.id === createdCat.id)) return prev;
         return [...prev, createdCat];
       });
@@ -121,7 +191,7 @@ export function TransactionModal({
     }
   };
 
-  if (!isOpen) return null;
+  if (!isOpen && !isAnimatingOut) return null;
 
   const filteredCategories = localCategories.filter(
     (c) => c.jenis === (jenis === "DEBIT" ? "MASUK" : "KELUAR")
@@ -184,7 +254,23 @@ export function TransactionModal({
       nominalInput.reset();
       setFile(null);
       onSuccess();
-      onClose();
+
+      // Jika mode multi-queue: maju ke item berikutnya, jangan tutup modal
+      if (multiQueue.length > 0) {
+        const nextIdx = multiQueueIdx + 1;
+        if (nextIdx < multiQueue.length) {
+          setMultiQueueIdx(nextIdx);
+          loadQueueItem(multiQueue, nextIdx, multiTanggal);
+        } else {
+          // Semua item selesai
+          setMultiQueue([]);
+          setMultiQueueIdx(0);
+          setMultiTanggal("");
+          onClose();
+        }
+      } else {
+        onClose();
+      }
     } catch (err: unknown) {
       const e = err as Error;
       setErrorMsg(e.message || "Terjadi kesalahan saat menyimpan transaksi.");
@@ -202,10 +288,36 @@ export function TransactionModal({
     setIsScanModalOpen(false);
   };
 
+  const handleNextQueueItem = () => {
+    const nextIdx = multiQueueIdx + 1;
+    if (nextIdx >= multiQueue.length) {
+      setMultiQueue([]);
+      setMultiQueueIdx(0);
+      setMultiTanggal("");
+      return;
+    }
+    setMultiQueueIdx(nextIdx);
+    loadQueueItem(multiQueue, nextIdx, multiTanggal);
+  };
+
+  const isInMultiQueue = multiQueue.length > 0;
+
   return (
     <>
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl max-h-[92dvh] flex flex-col">
+    <div
+      className={isAnimatingOut ? "modal-backdrop-out" : "modal-backdrop-in"}
+      style={{
+        position: "fixed", inset: 0, zIndex: 50,
+        display: "flex", alignItems: "flex-end", justifyContent: "center",
+        backgroundColor: "rgba(2,6,23,0.82)",
+        backdropFilter: "blur(6px)",
+      }}
+    >
+      <div
+        style={{ width: "100%", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
+        className="sm:items-center sm:pb-8"
+      >
+      <div className={`w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl max-h-[92dvh] flex flex-col ${isAnimatingOut ? "modal-panel-out" : "modal-panel-in"}`}>
         {/* Drag handle (mobile) */}
         <div className="flex justify-center pt-3 pb-1 sm:hidden">
           <div className="h-1 w-10 rounded-full bg-slate-700" />
@@ -231,8 +343,8 @@ export function TransactionModal({
                 <span className="hidden xs:inline">Scan Nota</span>
               </button>
             )}
-            <button
-              onClick={onClose}
+          <button
+              onClick={handleClose}
               className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition"
             >
               <X className="h-5 w-5" />
@@ -242,6 +354,30 @@ export function TransactionModal({
 
         {/* Scrollable Body */}
         <div className="overflow-y-auto flex-1 px-5 py-4">
+          {/* Multi-scan queue banner */}
+          {isInMultiQueue && (
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2.5 animate-view-switch">
+              <div className="flex items-center gap-2 min-w-0">
+                <ScanLine className="h-4 w-4 text-violet-400 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-violet-300">
+                    Item {multiQueueIdx + 1} dari {multiQueue.length}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    Simpan transaksi ini, lalu lanjut ke item berikutnya
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleNextQueueItem}
+                className="shrink-0 text-[11px] font-bold text-violet-300 hover:text-violet-200 border border-violet-500/30 rounded-lg px-2.5 py-1 hover:bg-violet-500/20 transition"
+              >
+                {multiQueueIdx + 1 < multiQueue.length ? `Skip →` : "Selesai"}
+              </button>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="mb-4 flex items-center gap-2 rounded-xl bg-rose-500/10 border border-rose-500/20 p-3 text-xs text-rose-400">
               <AlertCircle className="h-4 w-4 shrink-0" />
@@ -516,7 +652,7 @@ export function TransactionModal({
         <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-800 bg-slate-900">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="rounded-xl border border-slate-800 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition"
           >
             Batal
@@ -545,6 +681,7 @@ export function TransactionModal({
           </button>
         </div>
       </div>
+      </div>
     </div>
 
     {/* Camera Scan Modal */}
@@ -555,6 +692,7 @@ export function TransactionModal({
         apiKey={geminiApiKey}
         model={geminiModel}
         onScanResult={handleScanResult}
+        onMultiScanResult={handleMultiScanResult}
       />
     )}
     </>
