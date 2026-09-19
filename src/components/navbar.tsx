@@ -53,7 +53,7 @@ export function Navbar({ madrasahName = "MI Islamiyah Sumberharjo", onRefresh, i
                 Kas Madrasah
               </span>
               <span className="hidden sm:inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-400 border border-emerald-500/20 shrink-0">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 <span>Drive-Synced</span>
               </span>
             </div>

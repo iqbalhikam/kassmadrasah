@@ -3,7 +3,12 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",   // Cegah FOIT — teks tampil langsung dengan fallback font
+  preload: true,
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: "Kas Madrasah Universal - Keuangan Kas Berbasis Google Drive",
@@ -23,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id" className="h-full antialiased">
+    <html lang="id" className={`h-full antialiased ${inter.variable}`}>
       <body className={`${inter.className} min-h-full bg-slate-900 text-slate-100 flex flex-col`}>
         <Providers>{children}</Providers>
       </body>

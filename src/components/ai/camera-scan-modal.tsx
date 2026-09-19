@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import {
   X, Camera, ScanLine, Loader2, CheckCircle2, AlertCircle, RefreshCw, Upload,
-  ListOrdered, Layers, ChevronRight, Banknote, CalendarDays,
+  ListOrdered, Layers, ChevronRight, Banknote, CalendarDays, RotateCcw,
 } from "lucide-react";
 import { ScanNotaResult, ScanNotaItem, GeminiModelOption } from "@/types";
 import { cn } from "@/lib/utils";
@@ -39,6 +39,7 @@ export function CameraScanModal({
   const [errorMsg, setErrorMsg]       = useState("");
   const [cameraError, setCameraError] = useState("");
   const [isCameraReady, setIsCameraReady] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
 
   // scan result state
   const [scanResult, setScanResult]   = useState<ScanNotaResult | null>(null);
@@ -54,12 +55,14 @@ export function CameraScanModal({
     setIsCameraReady(false);
   }, []);
 
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (portrait = false) => {
     setCameraError("");
     setIsCameraReady(false);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: portrait
+          ? { facingMode: "environment", width: { ideal: 720 }, height: { ideal: 1280 } }
+          : { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
       if (videoRef.current) {
@@ -74,13 +77,21 @@ export function CameraScanModal({
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (isOpen && mode === "camera") startCamera();
+      if (isOpen && mode === "camera") startCamera(isPortrait);
     }, 0);
     return () => {
       clearTimeout(timer);
       setTimeout(() => stopCamera(), 0);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, mode, startCamera, stopCamera]);
+
+  const handleToggleOrientation = useCallback(() => {
+    const next = !isPortrait;
+    setIsPortrait(next);
+    stopCamera();
+    setTimeout(() => startCamera(next), 100);
+  }, [isPortrait, stopCamera, startCamera]);
 
   const handleCapture = () => {
     if (!videoRef.current || !canvasRef.current) return;
@@ -237,7 +248,10 @@ export function CameraScanModal({
           {/* ── Camera mode ── */}
           {mode === "camera" && (
             <div className="space-y-3">
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 aspect-video">
+              <div className={cn(
+                "relative rounded-2xl overflow-hidden bg-slate-950 border border-slate-800 mx-auto w-full",
+                isPortrait ? "aspect-[9/16] max-w-[260px]" : "aspect-video"
+              )}>
                 <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
                 {!isCameraReady && !cameraError && (
                   <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -261,6 +275,16 @@ export function CameraScanModal({
                     </div>
                   </div>
                 )}
+                {/* Orientation toggle button */}
+                <button
+                  type="button"
+                  onClick={handleToggleOrientation}
+                  title={isPortrait ? "Ganti ke Landscape" : "Ganti ke Potret"}
+                  className="absolute top-2 right-2 flex items-center gap-1 rounded-lg bg-slate-900/80 border border-slate-700 px-2 py-1 text-[10px] font-semibold text-slate-300 hover:bg-slate-800 transition active:scale-95 backdrop-blur-sm"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  {isPortrait ? "Landscape" : "Potret"}
+                </button>
               </div>
               <canvas ref={canvasRef} className="hidden" />
               <p className="text-center text-[11px] text-slate-400">

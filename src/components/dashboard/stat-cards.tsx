@@ -13,7 +13,8 @@ export function StatCards({ summary }: StatCardsProps) {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {/* Real-time Balance Card */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-900/40 via-slate-900 to-slate-900 p-5 border border-emerald-500/30 shadow-xl shadow-emerald-950/20">
-        <div className="absolute top-0 right-0 -mt-2 -mr-2 h-24 w-24 rounded-full bg-emerald-500/10 blur-xl pointer-events-none" />
+        {/* Dekorasi blur dihapus — diganti warna solid yang lebih ringan */}
+        <div className="absolute top-0 right-0 -mt-2 -mr-2 h-24 w-24 rounded-full bg-emerald-500/10 pointer-events-none" />
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400">
             Saldo Kas Real-Time
@@ -33,7 +34,7 @@ export function StatCards({ summary }: StatCardsProps) {
       </div>
 
       {/* Total Debit (Penerimaan) */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 backdrop-blur-sm">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-teal-400">
             Total Pemasukan (Debit)
@@ -51,7 +52,7 @@ export function StatCards({ summary }: StatCardsProps) {
       </div>
 
       {/* Total Kredit (Pengeluaran) */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 backdrop-blur-sm">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-rose-400">
             Total Pengeluaran (Kredit)
@@ -69,7 +70,7 @@ export function StatCards({ summary }: StatCardsProps) {
       </div>
 
       {/* Total Transaksi Count */}
-      <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 backdrop-blur-sm">
+      <div className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
             Total Transaksi

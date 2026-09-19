@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import {
   Search,
@@ -12,7 +12,6 @@ import {
   ArrowUpRight,
   Loader2,
   Pencil,
-  ArrowUpDown,
   ArrowDown,
   ArrowUp,
 } from "lucide-react";
@@ -24,9 +23,10 @@ interface TransactionTableProps {
   transactions: Transaksi[];
   categories: Kategori[];
   saldoAwal?: number;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   onEdit?: (tx: Transaksi) => void;
   isDeletingId?: string | null;
+  isPresentationMode?: boolean;
 }
 
 export function TransactionTable({
@@ -36,39 +36,28 @@ export function TransactionTable({
   onDelete,
   onEdit,
   isDeletingId,
+  isPresentationMode = false,
 }: TransactionTableProps) {
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [selectedJenis, setSelectedJenis] = useState("ALL");
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
 
-  const filteredTransactions = transactions
-    .filter((t) => {
-    const matchSearch =
-      t.keterangan.toLowerCase().includes(search.toLowerCase()) ||
-      t.id.toLowerCase().includes(search.toLowerCase()) ||
-      (t.kategori_nama && t.kategori_nama.toLowerCase().includes(search.toLowerCase()));
+  // Debounce search: tunda filter 200ms setelah user berhenti mengetik
+  // Mencegah filter+sort dijalankan setiap keystroke (sangat berat di mobile)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSearchChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setSearchInput(val);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setSearch(val), 200);
+  }, []);
 
-    const matchCategory = selectedCategory === "ALL" || t.kategori_id === selectedCategory;
-    const matchJenis = selectedJenis === "ALL" || t.jenis === selectedJenis;
-
-      return matchSearch && matchCategory && matchJenis;
-    })
-    .sort((a, b) => {
-      const dateA = new Date(a.tanggal).getTime();
-      const dateB = new Date(b.tanggal).getTime();
-      if (dateA !== dateB) {
-        return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
-      }
-      // Tiebreaker: created_at untuk presisi detik jika tanggal sama
-      const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return sortOrder === "desc" ? createdB - createdA : createdA - createdB;
-    });
-
-  // ── Running balance map (dihitung dari semua transaksi, oldest-first) ──
-  const runningBalanceMap = new Map<string, number>();
-  {
+  // Running balance dihitung sekali dari semua transaksi (sorted oldest-first)
+  // Dibungkus useMemo agar tidak recompute kecuali transactions/saldoAwal berubah
+  const runningBalanceMap = useMemo(() => {
+    const map = new Map<string, number>();
     const chronological = [...transactions].sort((a, b) => {
       const dateA = new Date(a.tanggal).getTime();
       const dateB = new Date(b.tanggal).getTime();
@@ -80,12 +69,41 @@ export function TransactionTable({
     let running = saldoAwal;
     chronological.forEach((t) => {
       running += t.jenis === "DEBIT" ? t.nominal : -t.nominal;
-      runningBalanceMap.set(t.id, running);
+      map.set(t.id, running);
     });
-  }
+    return map;
+  }, [transactions, saldoAwal]);
+
+  // Filter + sort hanya recompute saat dependensi berubah, bukan setiap render
+  const filteredTransactions = useMemo(() => {
+    const searchLower = search.toLowerCase();
+    return transactions
+      .filter((t) => {
+        if (search) {
+          const matchSearch =
+            t.keterangan.toLowerCase().includes(searchLower) ||
+            t.id.toLowerCase().includes(searchLower) ||
+            (t.kategori_nama && t.kategori_nama.toLowerCase().includes(searchLower));
+          if (!matchSearch) return false;
+        }
+        if (selectedCategory !== "ALL" && t.kategori_id !== selectedCategory) return false;
+        if (selectedJenis !== "ALL" && t.jenis !== selectedJenis) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.tanggal).getTime();
+        const dateB = new Date(b.tanggal).getTime();
+        if (dateA !== dateB) {
+          return sortOrder === "desc" ? dateB - dateA : dateA - dateB;
+        }
+        const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return sortOrder === "desc" ? createdB - createdA : createdA - createdB;
+      });
+  }, [transactions, search, selectedCategory, selectedJenis, sortOrder]);
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 sm:p-5 backdrop-blur-sm">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900 p-4 sm:p-5">
       {/* ── Controls: Search & Filters ── */}
       <div className="flex flex-col gap-3 mb-5">
         {/* Search */}
@@ -94,8 +112,8 @@ export function TransactionTable({
           <input
             type="text"
             placeholder="Cari transaksi, ID, atau keterangan..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={searchInput}
+            onChange={handleSearchChange}
             className="w-full rounded-xl border border-slate-800 bg-slate-950/80 pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           />
         </div>
@@ -164,11 +182,12 @@ export function TransactionTable({
           {filteredTransactions.map((tx) => {
             const isDebit = tx.jenis === "DEBIT";
             const isDeleting = isDeletingId === tx.id;
+            const saldo = runningBalanceMap.get(tx.id) ?? 0;
             return (
               <div
                 key={tx.id}
                 className={cn(
-                  "rounded-xl border p-4 transition-all",
+                  "rounded-xl border p-4",
                   isDebit
                     ? "border-emerald-800/40 bg-emerald-950/20"
                     : "border-rose-800/40 bg-rose-950/20"
@@ -204,71 +223,70 @@ export function TransactionTable({
                 </div>
 
                 {/* Saldo berjalan */}
-                {(() => {
-                  const saldo = runningBalanceMap.get(tx.id) ?? 0;
-                  return (
-                    <div className="flex items-center justify-between mb-2.5 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
-                      <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">Saldo setelahnya</span>
-                      <span className={cn(
-                        "text-xs font-bold font-mono",
-                        saldo >= 0 ? "text-emerald-400" : "text-rose-400"
-                      )}>
-                        {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
-                      </span>
-                    </div>
-                  );
-                })()}
+                <div className="flex items-center justify-between mb-2.5 rounded-lg bg-slate-800/50 px-2.5 py-1.5">
+                  <span className="text-[10px] sm:text-[11px] text-slate-500 font-medium">Saldo setelahnya</span>
+                  <span className={cn(
+                    "text-xs font-bold font-mono",
+                    saldo >= 0 ? "text-emerald-400" : "text-rose-400"
+                  )}>
+                    {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
+                  </span>
+                </div>
 
                 {/* Actions */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60 pt-2.5">
-                  <div className="text-[11px]">
-                    {tx.bukti_url ? (
-                      <a
-                        href={tx.bukti_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 font-medium text-teal-400 hover:text-teal-300"
-                      >
-                        <ExternalLink className="h-3 w-3" /> Bukti
-                      </a>
-                    ) : (
-                      <span className="text-slate-600">Tanpa bukti</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1.5 ml-auto">
-                    {onEdit && (
-                      <button
-                        onClick={() => onEdit(tx)}
-                        title="Edit Transaksi"
-                        className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition active:scale-95"
-                      >
-                        <Pencil className="h-3 w-3" />
-                        <span>Edit</span>
-                      </button>
-                    )}
-                    <Link
-                      href={`/kuitansi/${tx.id}`}
-                      title="Cetak Kuitansi"
-                      className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300 hover:text-emerald-400 hover:border-emerald-500/30 transition active:scale-95"
-                    >
-                      <Printer className="h-3 w-3" />
-                      <span>Kuitansi</span>
-                    </Link>
-                    <button
-                      onClick={() => onDelete(tx.id)}
-                      disabled={isDeleting}
-                      className="flex items-center gap-1 rounded-lg border border-rose-900/40 bg-rose-950/20 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50 active:scale-95"
-                    >
-                      {isDeleting ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
+                {!isPresentationMode && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800/60 pt-2.5">
+                    <div className="text-[11px]">
+                      {tx.bukti_url ? (
+                        <a
+                          href={tx.bukti_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 font-medium text-teal-400 hover:text-teal-300"
+                        >
+                          <ExternalLink className="h-3 w-3" /> Bukti
+                        </a>
                       ) : (
-                        <Trash2 className="h-3 w-3" />
+                        <span className="text-slate-600">Tanpa bukti</span>
                       )}
-                      <span>Hapus</span>
-                    </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      {onEdit && (
+                        <button
+                          onClick={() => onEdit(tx)}
+                          title="Edit Transaksi"
+                          className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-amber-300 hover:bg-amber-500/10 hover:border-amber-500/30 transition active:scale-95"
+                        >
+                          <Pencil className="h-3 w-3" />
+                          <span>Edit</span>
+                        </button>
+                      )}
+                      <Link
+                        href={`/kuitansi/${tx.id}`}
+                        title="Cetak Kuitansi"
+                        className="flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-300 hover:text-emerald-400 hover:border-emerald-500/30 transition active:scale-95"
+                      >
+                        <Printer className="h-3 w-3" />
+                        <span>Kuitansi</span>
+                      </Link>
+                      {onDelete && (
+                        <button
+                          onClick={() => onDelete(tx.id)}
+                          disabled={isDeletingId === tx.id}
+                          className="flex items-center gap-1 rounded-lg border border-rose-900/40 bg-rose-950/20 px-2 py-1 text-[11px] text-rose-400 hover:bg-rose-500/10 transition disabled:opacity-50 active:scale-95"
+                        >
+                          {isDeletingId === tx.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3 w-3" />
+                          )}
+                          <span>Hapus</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             );
           })}
@@ -287,12 +305,13 @@ export function TransactionTable({
                 <th className="px-4 py-3 text-right">Nominal</th>
                 <th className="px-4 py-3 text-right">Saldo</th>
                 <th className="px-4 py-3 text-center">Bukti / Nota</th>
-                <th className="px-4 py-3 text-right">Aksi</th>
+                {!isPresentationMode && <th className="px-4 py-3 text-right">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 bg-slate-900/30">
               {filteredTransactions.map((tx) => {
                 const isDebit = tx.jenis === "DEBIT";
+                const saldo = runningBalanceMap.get(tx.id) ?? 0;
                 return (
                   <tr key={tx.id} className="hover:bg-slate-800/40 transition">
                     <td className="px-4 py-3 whitespace-nowrap text-xs font-medium text-slate-300">
@@ -324,19 +343,14 @@ export function TransactionTable({
                     </td>
                     {/* Saldo Berjalan */}
                     <td className="px-4 py-3 whitespace-nowrap text-right">
-                      {(() => {
-                        const saldo = runningBalanceMap.get(tx.id) ?? 0;
-                        return (
-                          <span
-                            className={cn(
-                              "text-xs font-bold font-mono",
-                              saldo >= 0 ? "text-emerald-400" : "text-rose-400"
-                            )}
-                          >
-                            {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
-                          </span>
-                        );
-                      })()}
+                      <span
+                        className={cn(
+                          "text-xs font-bold font-mono",
+                          saldo >= 0 ? "text-emerald-400" : "text-rose-400"
+                        )}
+                      >
+                        {saldo < 0 ? "-" : ""}{formatRupiah(Math.abs(saldo))}
+                      </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
                       {tx.bukti_url ? (
@@ -352,38 +366,42 @@ export function TransactionTable({
                         <span className="text-xs text-slate-600">-</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {onEdit && (
-                          <button
-                            onClick={() => onEdit(tx)}
-                            title="Edit Transaksi"
-                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-amber-400 transition"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                        )}
-                        <Link
-                          href={`/kuitansi/${tx.id}`}
-                          title="Cetak Kuitansi Resmi"
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition"
-                        >
-                          <Printer className="h-4 w-4" />
-                        </Link>
-                        <button
-                          onClick={() => onDelete(tx.id)}
-                          disabled={isDeletingId === tx.id}
-                          title="Hapus Transaksi"
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-400 transition disabled:opacity-50"
-                        >
-                          {isDeletingId === tx.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-4 w-4" />
+                    {!isPresentationMode && (
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {onEdit && (
+                            <button
+                              onClick={() => onEdit(tx)}
+                              title="Edit Transaksi"
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-amber-400 transition"
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
                           )}
-                        </button>
-                      </div>
-                    </td>
+                          <Link
+                            href={`/kuitansi/${tx.id}`}
+                            title="Cetak Kuitansi Resmi"
+                            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition"
+                          >
+                            <Printer className="h-4 w-4" />
+                          </Link>
+                          {onDelete && (
+                            <button
+                              onClick={() => onDelete(tx.id)}
+                              disabled={isDeletingId === tx.id}
+                              title="Hapus Transaksi"
+                              className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/10 hover:text-rose-400 transition disabled:opacity-50"
+                            >
+                              {isDeletingId === tx.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-4 w-4" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

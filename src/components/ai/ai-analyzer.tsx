@@ -75,7 +75,8 @@ export function AIAnalyzer({ dbData, apiKey, model = "gemini-3.7-flash" }: AIAna
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<AIAnalysisResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Collapsed by default — hemat resource di mobile, user buka manual jika butuh
+  const [isExpanded, setIsExpanded] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [isFromCache, setIsFromCache] = useState(false);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string>("");
@@ -138,51 +139,31 @@ export function AIAnalyzer({ dbData, apiKey, model = "gemini-3.7-flash" }: AIAna
     }
   };
 
-  // ── Auto-Check: Gunakan cache database jika data belum berubah, atau auto-analisis jika ada data baru ──
+  // ── Load cache dari database jika ada — TANPA auto-analisis otomatis ──
+  // Auto-analisis dihapus untuk menghemat resource di device mobile lemah.
+  // User bisa trigger manual lewat tombol "Analisis Sekarang".
   useEffect(() => {
     if (!apiKey) return;
 
     const savedHash = dbData.pengaturan.ai_analysis_hash;
     const savedResultStr = dbData.pengaturan.ai_analysis_result;
 
-    // 1. Jika data di database sama persis dengan hash saat ini & ada hasil tersimpan:
+    // Tampilkan cache dari database jika hash cocok
     if (savedHash && savedHash === currentDataHash && savedResultStr) {
       try {
         const rawParsed = JSON.parse(savedResultStr);
         const cleanParsed = sanitizeAnalysisResult(rawParsed);
-
-        // Jika cache yang tersimpan sebelumnya ternyata rusak (misal berisi JSON mentah),
-        // tampilkan hasil yang sudah dibersihkan dulu, lalu jalankan analisis ulang di background untuk memperbarui database
-        const isCorruptedCache =
-          typeof rawParsed.insight === "string" &&
-          (rawParsed.insight.trim().startsWith("{") || rawParsed.insight.includes('"insight":'));
-
         setResult(cleanParsed);
         setHasAnalyzed(true);
         setIsFromCache(true);
         activeHashRef.current = savedHash;
         setLastAnalyzedAt(dbData.pengaturan.ai_analysis_updated_at || "");
-        setIsAnalyzing(false);
-
-        if (isCorruptedCache) {
-          // Trigger analisis ulang otomatis agar database tersimpan dengan data bersih
-          handleAnalyze(currentDataHash, true);
-        }
-        return;
       } catch {
-        // Jika parse gagal, lanjut auto-analisis
+        // Jika parse cache gagal, biarkan user trigger manual
       }
     }
-
-    // 2. Jika sudah pernah dianalisis untuk hash saat ini pada sesi ini, jangan panggil lagi
-    if (activeHashRef.current === currentDataHash) {
-      return;
-    }
-
-    // 3. Jika data di database berubah atau belum pernah dianalisis: jalankan analisis otomatis
-    handleAnalyze(currentDataHash);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentDataHash, apiKey, dbData.pengaturan.ai_analysis_hash, dbData.pengaturan.ai_analysis_result]);
+  }, [apiKey, dbData.pengaturan.ai_analysis_hash, dbData.pengaturan.ai_analysis_result]);
 
   if (!apiKey) {
     return (
