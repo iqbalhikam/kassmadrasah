@@ -531,36 +531,59 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
   const filteredSummary = useMemo(() => {
     const totalDebit = filteredTransaksi.filter((t) => t.jenis === "DEBIT").reduce((s, t) => s + t.nominal, 0);
     const totalKredit = filteredTransaksi.filter((t) => t.jenis === "KREDIT").reduce((s, t) => s + t.nominal, 0);
-    const saldoAwal = dbData?.summary.saldoAwal ?? 0;
+    const baseSaldoAwal = dbData?.summary.saldoAwal ?? 0;
 
-    // Saldo akhir harus diambil dari running balance transaksi terakhir
-    // yang sudah dihitung dari SEMUA transaksi (bukan hanya dalam rentang filter).
-    // Ini memastikan saldo akhir di ringkasan = saldo di baris terakhir tabel transaksi.
+    let saldoAwalPeriode = baseSaldoAwal;
     let saldoAkhir: number;
-    if (filterMode === "range" && filterApplied && filteredTransaksi.length > 0) {
-      // Urutkan filteredTransaksi secara kronologis untuk mendapatkan yang terakhir
-      const sorted = [...filteredTransaksi].sort((a, b) => {
-        const dateA = new Date(a.tanggal).getTime();
-        const dateB = new Date(b.tanggal).getTime();
-        if (dateA !== dateB) return dateA - dateB;
-        const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return cA - cB;
-      });
-      const lastTx = sorted[sorted.length - 1];
-      // Ambil saldo running dari runningBalanceMap (dihitung dari semua transaksi)
-      saldoAkhir = runningBalanceMap.get(lastTx.id) ?? (saldoAwal + totalDebit - totalKredit);
+
+    if (filterMode === "range" && filterApplied) {
+      // 1. Saldo Awal Periode: Saldo terakhir dari transaksi sebelum tanggal mulai (dateFrom)
+      if (dateFrom && dbData?.transaksi) {
+        const priorTransactions = dbData.transaksi
+          .filter((t) => t.tanggal && t.tanggal < dateFrom)
+          .sort((a, b) => {
+            const dateA = new Date(a.tanggal).getTime();
+            const dateB = new Date(b.tanggal).getTime();
+            if (dateA !== dateB) return dateA - dateB;
+            const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return cA - cB;
+          });
+
+        if (priorTransactions.length > 0) {
+          const lastPriorTx = priorTransactions[priorTransactions.length - 1];
+          saldoAwalPeriode = runningBalanceMap.get(lastPriorTx.id) ?? baseSaldoAwal;
+        } else {
+          saldoAwalPeriode = baseSaldoAwal;
+        }
+      }
+
+      // 2. Saldo Akhir Periode: Saldo terakhir dari rentang periode
+      if (filteredTransaksi.length > 0) {
+        const sorted = [...filteredTransaksi].sort((a, b) => {
+          const dateA = new Date(a.tanggal).getTime();
+          const dateB = new Date(b.tanggal).getTime();
+          if (dateA !== dateB) return dateA - dateB;
+          const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return cA - cB;
+        });
+        const lastTx = sorted[sorted.length - 1];
+        saldoAkhir = runningBalanceMap.get(lastTx.id) ?? (saldoAwalPeriode + totalDebit - totalKredit);
+      } else {
+        saldoAkhir = saldoAwalPeriode;
+      }
     } else {
-      saldoAkhir = saldoAwal + totalDebit - totalKredit;
+      saldoAkhir = baseSaldoAwal + totalDebit - totalKredit;
     }
 
     return {
       totalDebit,
       totalKredit,
-      saldoAwal,
+      saldoAwal: saldoAwalPeriode,
       saldoAkhir,
     };
-  }, [filteredTransaksi, dbData, filterMode, filterApplied, runningBalanceMap]);
+  }, [filteredTransaksi, dbData, filterMode, filterApplied, runningBalanceMap, dateFrom]);
 
   const filteredCashflow = useMemo(() => buildCashflow(filteredTransaksi), [filteredTransaksi]);
 
