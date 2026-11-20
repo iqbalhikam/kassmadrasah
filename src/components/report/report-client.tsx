@@ -975,6 +975,9 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                           <div style={{ borderRadius: "12px", border: "1px solid #e2e8f0", backgroundColor: "#f8fafc", padding: "10px 12px" }}>
                             <p style={{ fontSize: "11px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", margin: 0, letterSpacing: "0.5px" }}>Saldo Awal</p>
                             <p style={{ fontSize: "14px", fontWeight: 800, color: "#0f172a", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.saldoAwal)}</p>
+                            <p style={{ fontSize: "9.5px", color: "#94a3b8", margin: "3px 0 0 0", lineHeight: 1.2 }}>
+                              {filterMode === "range" && filterApplied ? "Saldo sebelum periode filter" : "Saldo awal kas"}
+                            </p>
                           </div>
 
                           <div style={{ borderRadius: "12px", border: "1px solid #bbf7d0", backgroundColor: "#f0fdf4", padding: "10px 12px" }}>
@@ -982,6 +985,9 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                               <ArrowDownLeft className="h-3.5 w-3.5 shrink-0" /> Total Debit
                             </p>
                             <p style={{ fontSize: "14px", fontWeight: 800, color: "#15803d", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.totalDebit)}</p>
+                            <p style={{ fontSize: "9.5px", color: "#16a34a", margin: "3px 0 0 0", lineHeight: 1.2 }}>
+                              Total penerimaan kas
+                            </p>
                           </div>
 
                           <div style={{ borderRadius: "12px", border: "1px solid #fecdd3", backgroundColor: "#fff1f2", padding: "10px 12px" }}>
@@ -989,6 +995,9 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                               <ArrowUpRight className="h-3.5 w-3.5 shrink-0" /> Total Kredit
                             </p>
                             <p style={{ fontSize: "14px", fontWeight: 800, color: "#b91c1c", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.totalKredit)}</p>
+                            <p style={{ fontSize: "9.5px", color: "#dc2626", margin: "3px 0 0 0", lineHeight: 1.2 }}>
+                              Total pengeluaran kas
+                            </p>
                           </div>
 
                           <div style={{ borderRadius: "12px", border: "1px solid #99f6e4", backgroundColor: "#f0fdfa", padding: "10px 12px" }}>
@@ -996,6 +1005,9 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
                               <Wallet className="h-3.5 w-3.5 shrink-0" /> Saldo Akhir
                             </p>
                             <p style={{ fontSize: "14px", fontWeight: 800, color: "#0f766e", margin: "4px 0 0 0" }}>{formatRupiah(filteredSummary.saldoAkhir)}</p>
+                            <p style={{ fontSize: "9.5px", color: "#0d9488", margin: "3px 0 0 0", lineHeight: 1.2 }}>
+                              {filterMode === "range" && filterApplied ? "Saldo kas akhir periode" : "Sisa saldo saat ini"}
+                            </p>
                           </div>
                         </div>
                       </div>
