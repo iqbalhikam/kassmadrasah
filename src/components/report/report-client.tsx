@@ -506,21 +506,6 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
     });
   }, [dbData, filterMode, filterApplied, dateFrom, dateTo]);
 
-  // ── Recalculate summary from filtered transactions ────────────────────────
-  const filteredSummary = useMemo(() => {
-    const totalDebit = filteredTransaksi.filter((t) => t.jenis === "DEBIT").reduce((s, t) => s + t.nominal, 0);
-    const totalKredit = filteredTransaksi.filter((t) => t.jenis === "KREDIT").reduce((s, t) => s + t.nominal, 0);
-    const saldoAwal = dbData?.summary.saldoAwal ?? 0;
-    return {
-      totalDebit,
-      totalKredit,
-      saldoAwal,
-      saldoAkhir: saldoAwal + totalDebit - totalKredit,
-    };
-  }, [filteredTransaksi, dbData]);
-
-  const filteredCashflow = useMemo(() => buildCashflow(filteredTransaksi), [filteredTransaksi]);
-
   // ── Running balance map for PDF report (all transactions, chronological) ──
   const runningBalanceMap = useMemo(() => {
     if (!dbData) return new Map<string, number>();
@@ -541,6 +526,43 @@ export function ReportClient({ initialData, initialError = "" }: ReportClientPro
     });
     return map;
   }, [dbData]);
+
+  // ── Recalculate summary from filtered transactions ────────────────────────
+  const filteredSummary = useMemo(() => {
+    const totalDebit = filteredTransaksi.filter((t) => t.jenis === "DEBIT").reduce((s, t) => s + t.nominal, 0);
+    const totalKredit = filteredTransaksi.filter((t) => t.jenis === "KREDIT").reduce((s, t) => s + t.nominal, 0);
+    const saldoAwal = dbData?.summary.saldoAwal ?? 0;
+
+    // Saldo akhir harus diambil dari running balance transaksi terakhir
+    // yang sudah dihitung dari SEMUA transaksi (bukan hanya dalam rentang filter).
+    // Ini memastikan saldo akhir di ringkasan = saldo di baris terakhir tabel transaksi.
+    let saldoAkhir: number;
+    if (filterMode === "range" && filterApplied && filteredTransaksi.length > 0) {
+      // Urutkan filteredTransaksi secara kronologis untuk mendapatkan yang terakhir
+      const sorted = [...filteredTransaksi].sort((a, b) => {
+        const dateA = new Date(a.tanggal).getTime();
+        const dateB = new Date(b.tanggal).getTime();
+        if (dateA !== dateB) return dateA - dateB;
+        const cA = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const cB = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return cA - cB;
+      });
+      const lastTx = sorted[sorted.length - 1];
+      // Ambil saldo running dari runningBalanceMap (dihitung dari semua transaksi)
+      saldoAkhir = runningBalanceMap.get(lastTx.id) ?? (saldoAwal + totalDebit - totalKredit);
+    } else {
+      saldoAkhir = saldoAwal + totalDebit - totalKredit;
+    }
+
+    return {
+      totalDebit,
+      totalKredit,
+      saldoAwal,
+      saldoAkhir,
+    };
+  }, [filteredTransaksi, dbData, filterMode, filterApplied, runningBalanceMap]);
+
+  const filteredCashflow = useMemo(() => buildCashflow(filteredTransaksi), [filteredTransaksi]);
 
   // ── Period label for the report header ───────────────────────────────────
   const periodeLabel = useMemo(() => {
